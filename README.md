@@ -11,7 +11,7 @@ Trabajo práctico integrador de SIG (UTN FRRe, 2026) con las capas del SIG IGN 2
 | Parte | Estado |
 |---|---|
 | A.1 Base de datos espacial | ✅ PostGIS con las 47 capas cargadas y controladas |
-| A.2 Servidor de mapas (WMS/WFS) | En curso |
+| A.2 Servidor de mapas (WMS/WFS) | ✅ GeoServer con las 48 capas, estilos y edición por WFS-T verificados |
 | A.3 Visor web | Pendiente |
 | B Análisis RN11 | Pendiente |
 | C Mapa A4 | Pendiente |
@@ -35,8 +35,21 @@ Requisitos: Docker Desktop (en Windows con WSL 2), pgAdmin 4 y QGIS.
    docker compose run --rm gdal sh -c "sh scripts/control.sh > docs/control-carga.md"
    ```
    `docs/control-carga.md` tiene que terminar con "Con problemas: 0".
+5. Publicar las capas en GeoServer (workspace, stores, capas, estilos y permisos) y verificar los servicios:
+   ```sh
+   docker compose run --rm publicar
+   docker compose run --rm publicar python geoserver/verificar.py
+   ```
+   `docs/verificacion-servicios.md` tiene que terminar con "Con problemas: 0".
 
-Conexión desde pgAdmin o QGIS: host `127.0.0.1`, puerto `5432`, base `tpi`, usuario y contraseña `postgres`.
+| Servicio | Dirección | Usuario |
+|---|---|---|
+| PostGIS (pgAdmin, QGIS) | `127.0.0.1:5432`, base `tpi` | `postgres` / `postgres` |
+| GeoServer (web) | http://127.0.0.1:8080/geoserver | `admin` / `geoserver` |
+| WMS / WFS | `http://127.0.0.1:8080/geoserver/tpi/wms` · `/tpi/wfs` | lectura libre |
+| WFS-T sobre `obras_rn11` | `http://127.0.0.1:8080/geoserver/wfs` | `editor` / `editor` |
+
+Usar `127.0.0.1` y no `localhost` en el navegador: con `localhost` pueden fallar por cookies de otras aplicaciones.
 
 No levantar a la vez el Docker de los laboratorios: ambos usan el puerto 5432. `docker compose down -v` borra la base.
 
@@ -44,10 +57,11 @@ No levantar a la vez el Docker de los laboratorios: ambos usan el puerto 5432. `
 
 | Ruta | Contenido |
 |---|---|
-| `compose.yaml` | Servicios `db` (PostgreSQL 17 + PostGIS 3.6) y `gdal` (herramientas) |
+| `compose.yaml` | Servicios `db` (PostgreSQL 17 + PostGIS 3.6), `geoserver` (GeoServer 2.28) y las herramientas `gdal` y `publicar` |
 | `sql/` | Inicialización de la base: esquemas `ign` y `edicion`, normalización de nombres, `obras_rn11` |
 | `scripts/` | Inventario, carga y control de capas con GDAL |
-| `docs/` | Consigna, especificación, plan, [inventario](docs/inventario-capas.md) y [control de carga](docs/control-carga.md) |
+| `geoserver/` | Publicación por API REST (`publicar.py`), verificación de servicios (`verificar.py`) y estilos SLD |
+| `docs/` | Consigna, especificación, plan, [inventario](docs/inventario-capas.md), [control de carga](docs/control-carga.md) y [verificación de servicios](docs/verificacion-servicios.md) |
 | `data/` | Shapefiles originales (no se versionan) |
 
 ## Equipo

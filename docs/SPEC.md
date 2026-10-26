@@ -28,8 +28,8 @@ Usuarios: la cátedra (evalúa y ve la presentación) y el equipo (tiene que pod
 | Base espacial | PostgreSQL 17 + PostGIS 3.6, imagen `imresamu/postgis` | Tiene builds `amd64` y `arm64` | `postgis/postgis`: solo publica `amd64`; en Mac corre emulada y más lenta |
 | Servidor de mapas | GeoServer 2.28.x, imagen oficial `docker.osgeo.org/geoserver` | Estándar OGC completo (WMS, WFS, WFS-T, GetLegendGraphic), multiarquitectura, es lo visto en clase | GeoServer 3.0 (muy reciente, menos material de referencia); MapServer/QGIS Server (sin WFS-T tan simple) |
 | Carga de datos | `ogr2ogr` (GDAL) en un contenedor de un solo uso | Reproducible, sin instalar GDAL en Windows, controla codificación y nombres | `shp2pgsql` (menos control), carga manual desde QGIS (no reproducible) |
-| Configuración de GeoServer | Script contra la API REST | Rehacer workspace, store, capas y estilos con un comando | Versionar el `data_dir` (frágil, mezcla estado con configuración) |
-| Estilos | SLD exportados desde QGIS y ajustados a mano | Leyenda correcta por GetLegendGraphic | Estilos por defecto (no muestran clases) |
+| Configuración de GeoServer | Script contra la API REST (`geoserver/publicar.py`) | Rehacer workspace, stores, capas, estilos y permisos con un comando | Versionar el `data_dir` (frágil, mezcla estado con configuración) |
+| Estilos | SLD escritos a mano en `geoserver/estilos/` | Leyenda con clases por GetLegendGraphic y generalización por escala | Estilos por defecto (no muestran clases) |
 | Administración BD | pgAdmin 4 de escritorio | El equipo ya lo usa en los labs; útil para capturas del informe | Contenedor `dpage/pgadmin4` (descartado: problemas de cookies del navegador y un servicio más) |
 | Visor web | **Vite + TypeScript + OpenLayers** | Trae nativo todo lo que pide A.3 (ver tabla siguiente) | Leaflet (WFS-T y WMS GetFeatureInfo dependen de plugins poco mantenidos); MapLibre (orientado a teselas vectoriales, sin WFS-T) |
 | Proxy web | Proxy de Vite en desarrollo; Nginx en Compose para la demo | Mismo origen que GeoServer: evita CORS y no expone credenciales de WFS-T | Habilitar CORS en GeoServer (más configuración, mismo resultado) |
@@ -74,9 +74,11 @@ cp .env.example .env                                     # Windows: copy .env.ex
 docker compose up -d                                     # PostGIS (y GeoServer desde A.2)
 docker compose run --rm gdal sh scripts/cargar.sh        # shapefiles → PostGIS (A.1)
 docker compose run --rm gdal sh -c "sh scripts/control.sh > docs/control-carga.md"
+docker compose run --rm publicar                         # GeoServer: workspace, stores, capas, estilos, permisos (A.2)
+docker compose run --rm publicar python geoserver/verificar.py   # WMS, WFS y WFS-T → docs/verificacion-servicios.md
 ```
 
-Comandos de A.2 (publicación en GeoServer), del análisis B y del visor se agregan al implementarlos.
+Comandos del análisis B y del visor se agregan al implementarlos.
 
 ## Estructura del proyecto
 

@@ -2,7 +2,7 @@
 
 Guía para hacer la base espacial (A.1) y el servidor de mapas (A.2), sacando capturas para el informe. Cada paso tiene un objetivo, qué hacer y cómo verificar que quedó bien. Los pasos con 📸 son los que conviene capturar.
 
-Estado: **A.1 terminada** (26/10/2026). A.2 en curso.
+Estado: **A.1 y A.2 terminadas** (26/10/2026).
 
 ## Convenciones
 
@@ -50,58 +50,26 @@ Estado: **A.1 terminada** (26/10/2026). A.2 en curso.
 
 Los tres SQL se ejecutan solos al crear la base por primera vez (montados en `/docker-entrypoint-initdb.d`), así que en una compu nueva A.1 se reduce a: `.env`, `docker compose up -d`, `cargar.sh` y `control.sh`.
 
-## A.2 — Servidor de mapas (WMS y WFS)
+## A.2 — Servidor de mapas (WMS y WFS) ✅
 
-### Paso 11 — Levantar GeoServer 📸
-- Agregar el servicio `geoserver` a `compose.yaml`: volumen persistente para el *data dir*, sin datos de demo, contraseña de administrador desde `.env`.
-- `docker compose up -d geoserver` y entrar a http://localhost:8080/geoserver.
-- **Verificar:** login correcto y página *Server Status*. 📸
+| Paso | Qué se hizo | Archivo |
+|---|---|---|
+| 11 | Servicio `geoserver` (2.28.6) con volumen persistente, sin datos de demo, CORS activado, en `127.0.0.1:8080` | `compose.yaml` |
+| 12 | Workspace `tpi` (default), URI `https://github.com/matiasgzlez/TPI-GIS` | |
+| 13 | Stores PostGIS `ign` y `edicion` (host `db`) | |
+| 14 | Publicación manual de `provincias`, `red_vial`, `localidades` y `puente_red_vial_puntos` | |
+| 15 | Publicación del resto por API REST; `obras_rn11` con extensión fija de Chaco | `geoserver/publicar.py` |
+| 16 | Estilos SLD con clases y generalización por escala para las 4 capas principales y `obras_rn11` | `geoserver/estilos/` |
+| 17 | WMS: GetCapabilities, GetMap, GetFeatureInfo y GetLegendGraphic | |
+| 18 | WFS: GetCapabilities y GetFeature con BBOX. WFS-T: usuario `editor` (rol EDITOR) que solo puede escribir en `obras_rn11` | `geoserver/publicar.py`, `geoserver/verificar.py` |
+| 19 | QGIS como cliente WMS (estilos y leyenda del servidor) y WFS (vectores) | |
+| 20 | Persistencia tras `docker compose down` / `up`: 11 de 11 pruebas | `docs/verificacion-servicios.md` |
 
-### Paso 12 — Espacio de trabajo 📸
-- Crear el workspace `tpi`, con URI de espacio de nombres `https://github.com/matiasgzlez/TPI-GIS`.
-- **Verificar:** aparece en *Workspaces*. 📸
+Problemas encontrados:
+- Store creado con la casilla *Enabled* destildada: sus capas no se servían y se publicaron desactivadas con estilo `polygon`. `publicar.py` ahora activa los stores desactivados.
+- La imagen oficial reescribe `users.xml` y `roles.xml` en cada arranque si recibe `GEOSERVER_ADMIN_USER`/`PASSWORD`, y borraba el usuario `editor`. Se quitaron esas variables del servicio (el admin queda con los valores por defecto).
 
-### Paso 13 — Almacenes PostGIS 📸
-- Crear el store `ign` (PostGIS, host `db`, esquema `ign`) y el store `edicion` (esquema `edicion`).
-- **Verificar:** al crearlos, GeoServer lista las tablas disponibles para publicar. 📸
-
-### Paso 14 — Publicar las 4 capas principales a mano 📸
-- Publicar `provincias`, `red_vial`, `localidades` y `puente_red_vial_puntos`. En cada una: título legible, SRS EPSG:4326, *Compute from data* para la extensión nativa y *Compute from native bounds* para la geográfica.
-- **Verificar:** *Layer Preview* en OpenLayers muestra cada capa. 📸 (una por lo menos)
-
-### Paso 15 — Publicar las 43 capas restantes y `obras_rn11`
-- Dos opciones:
-  - **a) Desde la web.** Repetir el paso 14 para cada capa. Es lento pero no requiere escribir código.
-  - **b) Con un script de la API REST de GeoServer.** Hace exactamente lo mismo que el paso 14 y sirve para reconstruir todo si se pierde el volumen. **Recomendada:** las capturas del paso 14 ya muestran el procedimiento manual.
-- **Verificar:** 48 capas en *Layers* (47 IGN + `obras_rn11`). 📸
-
-### Paso 16 — Estilos iniciales 📸
-- Crear estilos SLD simples y legibles para las 4 capas principales: límites provinciales, red vial por tipo de camino, localidades y puentes. En QGIS se diseñan y se exportan como SLD; en GeoServer se cargan en *Styles*.
-- Las demás capas quedan con el estilo por defecto según su geometría. La simbología por clases para la leyenda del visor se termina en A.3.
-- **Verificar:** *Layer Preview* con el estilo nuevo y la leyenda (`GetLegendGraphic`). 📸
-
-### Paso 17 — Verificar WMS 📸
-- Abrir en el navegador `GetCapabilities` del WMS (las 48 capas listadas). 📸
-- Hacer un `GetMap` en PNG de `provincias` + `red_vial` con extensión de Chaco. 📸
-- Hacer un `GetFeatureInfo` sobre una localidad (la va a usar la consulta por punto de A.3).
-
-### Paso 18 — Verificar WFS 📸
-- Abrir `GetCapabilities` del WFS. 📸
-- Hacer un `GetFeature` de `localidades` filtrado por un recuadro (BBOX) de Chaco y con `count=50`, en GeoJSON. 📸
-- Comprobar que el WFS está en modo *Transactional* y que la seguridad solo permite escribir en `obras_rn11`. Esto lo necesita A.3.
-
-### Paso 19 — Consumir los servicios desde QGIS 📸
-- En QGIS, agregar una conexión WMS y otra WFS a `http://localhost:8080/geoserver/tpi/ows`.
-- Cargar `red_vial` por WMS y `localidades` por WFS.
-- **Verificar:** ambas se dibujan y la tabla de atributos WFS muestra datos. 📸
-
-### Paso 20 — Persistencia 📸
-- `docker compose down` (sin `-v`) y después `docker compose up -d`.
-- **Verificar:** siguen las tablas en PostGIS, las capas y estilos en GeoServer y la conexión desde QGIS. 📸
-
-**Cierre de A.2:** explicación en `docs/informe/a2.md` y README actualizado con cómo levantar todo.
-
----
+En una compu nueva, A.2 se reduce a `docker compose up -d`, `docker compose run --rm publicar` y `docker compose run --rm publicar python geoserver/verificar.py`.
 
 ## Qué se versiona y qué no
 

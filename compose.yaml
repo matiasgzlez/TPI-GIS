@@ -22,6 +22,25 @@ services:
       retries: 5
     restart: unless-stopped
 
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.28.6
+    # Sin GEOSERVER_ADMIN_USER/PASSWORD a propósito: con esas variables la imagen reescribe
+    # users.xml y roles.xml en cada arranque y borra el usuario editor. El admin queda con
+    # los valores por defecto de GeoServer (admin / geoserver), los mismos del .env.
+    environment:
+      SKIP_DEMO_DATA: "true"
+      ROOT_WEBAPP_REDIRECT: "true"
+      CORS_ENABLED: "true"
+      EXTRA_JAVA_OPTS: "-Xms512m -Xmx2g"
+    ports:
+      - "127.0.0.1:${GEOSERVER_PORT:-8080}:8080"
+    volumes:
+      - geoserver-data:/opt/geoserver_data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   gdal:
     image: ghcr.io/osgeo/gdal:ubuntu-small-3.13.3
     profiles: ["herramientas"]
@@ -39,5 +58,27 @@ services:
       db:
         condition: service_healthy
 
+  publicar:
+    image: python:3.13-alpine
+    profiles: ["herramientas"]
+    working_dir: /tpi
+    command: ["python", "geoserver/publicar.py"]
+    environment:
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_ADMIN_USER}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD}
+      GEOSERVER_EDITOR_USER: ${GEOSERVER_EDITOR_USER}
+      GEOSERVER_EDITOR_PASSWORD: ${GEOSERVER_EDITOR_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./:/tpi:ro
+      - ./data/SIG_IGN2011:/datos:ro
+      - ./docs:/salida
+    depends_on:
+      - geoserver
+
 volumes:
   db-data:
+  geoserver-data:

@@ -1,0 +1,43 @@
+name: tpi-gis
+
+services:
+  db:
+    image: imresamu/postgis:17-3.6
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Solo se ejecutan al crear la base por primera vez (volumen vacío), después del 10_postgis.sh de la imagen.
+      - ./sql/01_esquemas.sql:/docker-entrypoint-initdb.d/21_esquemas.sql:ro
+      - ./sql/02_normalizar_nombres.sql:/docker-entrypoint-initdb.d/22_normalizar_nombres.sql:ro
+      - ./sql/03_obras_rn11.sql:/docker-entrypoint-initdb.d/23_obras_rn11.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  gdal:
+    image: ghcr.io/osgeo/gdal:ubuntu-small-3.13.3
+    profiles: ["herramientas"]
+    working_dir: /tpi
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./:/tpi
+      - ./data/SIG_IGN2011:/datos:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

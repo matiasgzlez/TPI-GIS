@@ -72,6 +72,23 @@ En los dos casos el proxy (Vite en desarrollo, `web/nginx.conf` en la demo) mand
 
 No levantar a la vez el Docker de los laboratorios: ambos usan el puerto 5432. `docker compose down -v` borra la base.
 
+## Ramas
+
+| Rama | Para qué |
+|---|---|
+| `main` | Versión estable, la que se entrega y se muestra en la demo |
+| `develop` | Integración: acá llegan todas las features |
+| `visor-...`, `analisis-...`, etc. | Una por tarea, creada desde `develop` |
+
+```sh
+git checkout develop && git pull
+git checkout -b visor-nombre-de-la-tarea
+# ...cambios y commits...
+git push -u origin visor-nombre-de-la-tarea
+```
+
+Después, abrir un Pull Request en GitHub **con base `develop`** (GitHub propone `main` por defecto: cambiarlo). Otro integrante lo prueba y lo aprueba antes de mergear. Cuando `develop` está probada, se abre un PR de `develop` a `main`.
+
 ## Estructura
 
 | Ruta | Contenido |

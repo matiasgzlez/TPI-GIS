@@ -12,7 +12,7 @@ Trabajo práctico integrador de SIG (UTN FRRe, 2026) con las capas del SIG IGN 2
 |---|---|
 | A.1 Base de datos espacial | ✅ PostGIS con las 47 capas cargadas y controladas |
 | A.2 Servidor de mapas (WMS/WFS) | ✅ GeoServer con las 48 capas, estilos y edición por WFS-T verificados |
-| A.3 Visor web | Pendiente |
+| A.3 Visor web | En curso: base con las 7 funciones en React + OpenLayers |
 | B Análisis RN11 | Pendiente |
 | C Mapa A4 | Pendiente |
 
@@ -51,16 +51,36 @@ Requisitos: Docker Desktop (en Windows con WSL 2), pgAdmin 4 y QGIS.
 
 Usar `127.0.0.1` y no `localhost` en el navegador: con `localhost` pueden fallar por cookies de otras aplicaciones.
 
+## Visor web (A.3)
+
+Requisito extra: Node.js 22 o superior. Con la base y GeoServer levantados:
+
+```sh
+cd web
+npm install          # la primera vez y cada vez que cambie package.json
+npm run dev          # http://localhost:5173, se recarga solo al guardar
+```
+
+Para la demo, generar el build y servirlo con nginx en http://127.0.0.1:8081:
+
+```sh
+cd web && npm run build && cd ..
+docker compose up -d web
+```
+
+En los dos casos el proxy (Vite en desarrollo, `web/nginx.conf` en la demo) manda `/geoserver` a GeoServer y agrega las credenciales del `editor` solo en `/wfst`. Si se cambia la contraseña del editor en `.env`, actualizar también el base64 de `web/nginx.conf`.
+
 No levantar a la vez el Docker de los laboratorios: ambos usan el puerto 5432. `docker compose down -v` borra la base.
 
 ## Estructura
 
 | Ruta | Contenido |
 |---|---|
-| `compose.yaml` | Servicios `db` (PostgreSQL 17 + PostGIS 3.6), `geoserver` (GeoServer 2.28) y las herramientas `gdal` y `publicar` |
+| `compose.yaml` | Servicios `db` (PostgreSQL 17 + PostGIS 3.6), `geoserver` (GeoServer 2.28) `web` (nginx con el build del visor) y las herramientas `gdal` y `publicar` |
 | `sql/` | Inicialización de la base: esquemas `ign` y `edicion`, normalización de nombres, `obras_rn11` |
 | `scripts/` | Inventario, carga y control de capas con GDAL |
 | `geoserver/` | Publicación por API REST (`publicar.py`), verificación de servicios (`verificar.py`) y estilos SLD |
+| `web/` | Visor web: Vite + React + TypeScript + OpenLayers (`src/visor.ts` crea el mapa, `src/herramientas.ts` las consultas y la medición, `src/obras.ts` el WFS-T, `src/componentes/` el panel) |
 | `docs/` | Consigna, especificación, plan, [inventario](docs/inventario-capas.md), [control de carga](docs/control-carga.md) y [verificación de servicios](docs/verificacion-servicios.md) |
 | `data/` | Shapefiles originales (no se versionan) |
 

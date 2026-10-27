@@ -1,0 +1,10 @@
+body { margin: 0; font: 14px system-ui, sans-serif; }
+#root { display: flex; height: 100vh; }
+.panel { width: 300px; padding: 12px; overflow-y: auto; box-sizing: border-box; border-right: 1px solid #ccc; }
+.mapa { flex: 1; }
+h2 { font-size: 15px; margin: 14px 0 6px; }
+label { display: block; margin: 3px 0; }
+.leyenda { margin: 0 0 6px 22px; }
+.resultado { white-space: pre-wrap; font-size: 12px; background: #f4f4f4; padding: 6px; }
+.form-obra { background: #fff8e0; padding: 6px; margin-top: 6px; }
+.form-obra select, .form-obra input { width: 100%; margin-bottom: 4px; box-sizing: border-box; }

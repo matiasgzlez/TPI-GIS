@@ -12,7 +12,7 @@ Trabajo práctico integrador de SIG (UTN FRRe, 2026) con las capas del SIG IGN 2
 |---|---|
 | A.1 Base de datos espacial | ✅ PostGIS con las 47 capas cargadas y controladas |
 | A.2 Servidor de mapas (WMS/WFS) | ✅ GeoServer con las 48 capas, estilos y edición por WFS-T verificados |
-| A.3 Visor web | En curso: base con las 7 funciones en React + OpenLayers |
+| A.3 Visor web | En revisión: las 7 funciones con las 48 capas, tema claro/oscuro y Foco RN11 ([spec](docs/plans/visor-a3.md)) |
 | B Análisis RN11 | Pendiente |
 | C Mapa A4 | Pendiente |
 
@@ -70,7 +70,11 @@ docker compose up -d web
 
 En los dos casos el proxy (Vite en desarrollo, `web/nginx.conf` en la demo) manda `/geoserver` a GeoServer y agrega las credenciales del `editor` solo en `/wfst`. Si se cambia la contraseña del editor en `.env`, actualizar también el base64 de `web/nginx.conf`.
 
-No levantar a la vez el Docker de los laboratorios: ambos usan el puerto 5432. `docker compose down -v` borra la base.
+Atajos del visor: `1`–`6` eligen herramienta (navegar, consulta por punto, por rectángulo, distancia, área, nueva obra), `/` o `⌘K` van al buscador central (lugares, capas, herramientas y el historial) y `Esc` vuelve a navegar.
+
+Las capas prendidas se piden juntas, en un solo WMS por tesela, con un `SLD_BODY` que las lista en orden de dibujo; las de contexto (cursos y espejos de agua, límites, islas) llevan ahí su estilo propio (`web/src/estilos.ts`) y la configuración de GeoServer no cambia. Rendimiento medido antes y después: [docs/optimizacion-visor.md](docs/optimizacion-visor.md).
+
+`docker compose down -v` borra la base.
 
 ## Ramas
 
@@ -97,7 +101,7 @@ Después, abrir un Pull Request en GitHub **con base `develop`** (GitHub propone
 | `sql/` | Inicialización de la base: esquemas `ign` y `edicion`, normalización de nombres, `obras_rn11` |
 | `scripts/` | Inventario, carga y control de capas con GDAL |
 | `geoserver/` | Publicación por API REST (`publicar.py`), verificación de servicios (`verificar.py`) y estilos SLD |
-| `web/` | Visor web: Vite + React + TypeScript + OpenLayers (`src/visor.ts` crea el mapa, `src/herramientas.ts` las consultas y la medición, `src/obras.ts` el WFS-T, `src/componentes/` el panel) |
+| `web/` | Visor web: Vite + React + TypeScript + OpenLayers, con componentes de HeroUI y Aceternity UI (`src/config.ts` las 48 capas agrupadas, `src/visor.ts` el mapa, `src/estilos.ts` los SLD del cliente, `src/herramientas.ts` consultas y medición, `src/obras.ts` el WFS-T, `src/componentes/` los paneles y `src/componentes/ui/` los de Aceternity) |
 | `docs/` | Consigna, especificación, plan, [inventario](docs/inventario-capas.md), [control de carga](docs/control-carga.md) y [verificación de servicios](docs/verificacion-servicios.md) |
 | `data/` | Shapefiles originales (no se versionan) |
 

@@ -1,10 +1,193 @@
-body { margin: 0; font: 14px system-ui, sans-serif; }
-#root { display: flex; height: 100vh; }
-.panel { width: 300px; padding: 12px; overflow-y: auto; box-sizing: border-box; border-right: 1px solid #ccc; }
-.mapa { flex: 1; }
-h2 { font-size: 15px; margin: 14px 0 6px; }
-label { display: block; margin: 3px 0; }
-.leyenda { margin: 0 0 6px 22px; }
-.resultado { white-space: pre-wrap; font-size: 12px; background: #f4f4f4; padding: 6px; }
-.form-obra { background: #fff8e0; padding: 6px; margin-top: 6px; }
-.form-obra select, .form-obra input { width: 100%; margin-bottom: 4px; box-sizing: border-box; }
+/* HeroUI por partes: solo los componentes que usa el visor (el paquete completo suma 460 KB de CSS).
+   Mismo orden que @heroui/styles/dist/index.css. */
+@layer theme, base, components, utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../node_modules/@heroui/styles/dist/base/base.css" layer(base);
+@import "../node_modules/@heroui/styles/dist/base/scrollbar.css" layer(base);
+@import "../node_modules/@heroui/styles/dist/components/label.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/description.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/button.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/toggle-button.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/toggle-button-group.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/list-box-item.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/list-box.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/switch.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/spinner.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/toast.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/textarea.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/surface.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/popover.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/tooltip.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/components/select.css" layer(components);
+@import "../node_modules/@heroui/styles/dist/themes/default/index.css" layer(theme);
+@import "../node_modules/@heroui/styles/dist/utilities/index.css";
+@import "../node_modules/@heroui/styles/dist/variants/index.css";
+@import "@fontsource-variable/instrument-sans";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Tokens del visor. Los que lee el canvas de OpenLayers (--vial, --tinta, --papel) van en hex:
+   ver hacerTransparente() en visor.ts. */
+:root {
+  --papel: #eceeeb;
+  --grilla: rgba(21, 23, 26, 0.06);
+  --superficie: #ffffff;
+  --superficie-2: #f3f4f2;
+  --superficie-3: #e9ebe8;
+  --tinta: #15171a;
+  --tinta-2: #4a5056;
+  --tinta-3: #6b7178;
+  --linea: #e4e6e3;
+  --vial: #e5521f;
+  --vial-texto: #b93f12;
+  --vial-suave: #fdebe3;
+  --sombra: 0 1px 2px rgba(21, 23, 26, 0.06), 0 10px 30px -10px rgba(21, 23, 26, 0.18);
+  --sombra-alta: 0 2px 4px rgba(21, 23, 26, 0.06), 0 24px 48px -16px rgba(21, 23, 26, 0.28);
+
+  /* HeroUI: un solo acento, el naranja vial. */
+  --accent: #e5521f;
+  --accent-foreground: #ffffff;
+  --focus: #e5521f;
+  --radius: 0.75rem;
+  --background: var(--papel);
+  --foreground: var(--tinta);
+  --overlay: var(--superficie);
+  --surface: var(--superficie);
+  --surface-secondary: var(--superficie-2);
+  --default: var(--superficie-2);
+  --default-foreground: var(--tinta);
+  --field-background: var(--superficie-2);
+  --field-foreground: var(--tinta);
+  --muted: var(--tinta-3);
+  --border: var(--linea);
+  --separator: var(--linea);
+}
+
+.dark {
+  --papel: #0e1012;
+  --grilla: rgba(236, 238, 235, 0.05);
+  --superficie: #1a1d21;
+  --superficie-2: #23272c;
+  --superficie-3: #2d3238;
+  --tinta: #f1f2f0;
+  --tinta-2: #c0c5ca;
+  --tinta-3: #969ca3;
+  --linea: #2e3339;
+  --vial: #ff6a33;
+  --vial-texto: #ff8a5c;
+  --vial-suave: #3a2219;
+  --sombra: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -12px rgba(0, 0, 0, 0.7);
+  --sombra-alta: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 56px -16px rgba(0, 0, 0, 0.8);
+
+  --accent: #ff6a33;
+  --focus: #ff6a33;
+  --background: var(--papel);
+  --foreground: var(--tinta);
+  --overlay: var(--superficie);
+  --surface: var(--superficie);
+  --surface-secondary: var(--superficie-2);
+  --default: var(--superficie-2);
+  --default-foreground: var(--tinta);
+  --field-background: var(--superficie-2);
+  --field-foreground: var(--tinta);
+  --muted: var(--tinta-3);
+  --border: var(--linea);
+  --separator: var(--linea);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--papel);
+  color: var(--tinta);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mapa { position: absolute; inset: 0; background: var(--papel); }
+.mapa:focus-visible { outline: none; }
+
+/* Superficie de todos los paneles: sólida, con una sola elevación (sombra). */
+.panel { background: var(--superficie); box-shadow: var(--sombra); border-radius: 16px; }
+
+/* Superficies del navegador con la paleta del visor. */
+::selection { background: color-mix(in srgb, var(--vial) 28%, transparent); color: inherit; }
+input, textarea { caret-color: var(--vial); }
+:focus-visible { outline-color: var(--vial); }
+.desplazable { scrollbar-width: thin; scrollbar-color: var(--superficie-3) transparent; }
+
+/* --- OpenLayers --- */
+
+.caja-consulta {
+  border: 2px solid var(--vial);
+  background: color-mix(in srgb, var(--vial) 10%, transparent);
+  border-radius: 4px;
+}
+
+.etiqueta-medida {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+  color: var(--tinta);
+  background: var(--superficie);
+  box-shadow: var(--sombra);
+  pointer-events: none;
+}
+.etiqueta-medida.terminada { background: var(--vial); color: #fff; }
+
+.escala .ol-scale-line { position: static; background: none; padding: 0; border-radius: 0; }
+.escala .ol-scale-line-inner {
+  border: 2px solid var(--tinta);
+  border-top: none;
+  color: var(--tinta);
+  font: 600 12px var(--font-sans);
+  margin: 0;
+  padding-bottom: 2px;
+  transition: width 0.25s ease;
+}
+
+.minimapa .ol-overviewmap { position: static; width: 100%; height: 100%; background: none; border: none; padding: 0; border-radius: inherit; }
+.minimapa .ol-overviewmap-map { width: 100%; height: 100%; margin: 0; border: none; }
+.minimapa .ol-overviewmap .ol-overviewmap-box {
+  border: 2px solid var(--vial);
+  background: color-mix(in srgb, var(--vial) 16%, transparent);
+  border-radius: 2px;
+}
+.minimapa .ol-overviewmap button { display: none; }
+.minimapa .ol-viewport { border-radius: inherit; }
+
+/* Tema oscuro: las teselas de GeoServer están pensadas para fondo claro. Invertir y rotar el tono
+   mantiene los colores reconocibles (agua azul, rutas naranjas) y pasa los rótulos a claro.
+   Las leyendas reciben el mismo filtro para seguir coincidiendo con el mapa. */
+.dark .capa-wms,
+.dark .leyenda-wms {
+  filter: invert(1) hue-rotate(180deg) saturate(0.9) brightness(0.92);
+}
+
+/* --- Movimiento --- */
+
+@keyframes entrar {
+  from { opacity: 0; transform: translateY(var(--desde, 12px)); }
+  to { opacity: 1; transform: none; }
+}
+.entra { animation: entrar 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: var(--retraso, 0ms); }
+
+@keyframes desplegar {
+  from { opacity: 0; transform: translateY(-6px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+.despliega { animation: desplegar 0.22s cubic-bezier(0.22, 1, 0.36, 1) both; transform-origin: top center; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
+}

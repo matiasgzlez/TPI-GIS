@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Visor web de las capas del SIG IGN 250 servidas por GeoServer, con foco en la Ruta Nacional 11 en Chaco.">
+  <title>Visor SIG · RN11 Chaco</title>
+  <link rel="icon" href="/escudo.svg" type="image/svg+xml">
+  <script>
+    // El tema se aplica antes del primer pintado para que no haya un destello del otro.
+    try {
+      var guardado = localStorage.getItem('tema');
+      var oscuro = guardado ? guardado === 'oscuro' : matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', oscuro);
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

@@ -31,7 +31,7 @@ Usuarios: la cátedra (evalúa y ve la presentación) y el equipo (tiene que pod
 | Configuración de GeoServer | Script contra la API REST (`geoserver/publicar.py`) | Rehacer workspace, stores, capas, estilos y permisos con un comando | Versionar el `data_dir` (frágil, mezcla estado con configuración) |
 | Estilos | SLD escritos a mano en `geoserver/estilos/` | Leyenda con clases por GetLegendGraphic y generalización por escala | Estilos por defecto (no muestran clases) |
 | Administración BD | pgAdmin 4 de escritorio | El equipo ya lo usa en los labs; útil para capturas del informe | Contenedor `dpage/pgadmin4` (descartado: problemas de cookies del navegador y un servicio más) |
-| Visor web | **Vite + TypeScript + OpenLayers** | Trae nativo todo lo que pide A.3 (ver tabla siguiente) | Leaflet (WFS-T y WMS GetFeatureInfo dependen de plugins poco mantenidos); MapLibre (orientado a teselas vectoriales, sin WFS-T) |
+| Visor web | **Vite + React + TypeScript + OpenLayers**, con HeroUI v3 (Tailwind 4) y componentes de Aceternity UI | React para los paneles (lo eligió el equipo); OpenLayers trae nativo todo lo que pide A.3 (ver tabla siguiente). Diseño y decisiones en [plans/visor-a3.md](plans/visor-a3.md) | Leaflet (WFS-T y WMS GetFeatureInfo dependen de plugins poco mantenidos); MapLibre (orientado a teselas vectoriales, sin WFS-T) |
 | Proxy web | Proxy de Vite en desarrollo; Nginx en Compose para la demo | Mismo origen que GeoServer: evita CORS y no expone credenciales de WFS-T | Habilitar CORS en GeoServer (más configuración, mismo resultado) |
 | Análisis B | SQL en PostGIS, verificado en QGIS | Resultados reproducibles y auditables; QGIS da las capturas | Solo geoprocesos manuales en QGIS (difíciles de repetir) |
 | Mapa C | Compositor de impresión de QGIS 4.2 (proyecto `.qgz` versionado) | Herramienta de diseño cartográfico de la materia; exporta PDF A4 | Imprimir desde el visor web (sin control cartográfico) |
@@ -91,7 +91,7 @@ sql/                    → SQL de inicialización de la base (se ejecutan solos
 scripts/                → inventario, carga y control con GDAL
 geoserver/              → publicación y estilos SLD (A.2)
 analysis/               → consultas SQL del punto B
-web/                    → visor Vite + TypeScript + OpenLayers (A.3)
+web/                    → visor Vite + React + TypeScript + OpenLayers (A.3)
 qgis/                   → proyecto QGIS y composición A4 (C)
 docs/                   → consigna, spec, plan, inventario y control
 ```
@@ -135,6 +135,6 @@ docs/                   → consigna, spec, plan, inventario y control
 
 ## Preguntas abiertas
 
-1. ¿El visor publica las 47 capas o un subconjunto curado? (Propuesta: publicar todas en GeoServer y mostrar en el visor las ~15 relevantes, agrupadas.)
+1. ~~¿El visor publica las 47 capas o un subconjunto curado?~~ Decidido el 29/10/2026: las 48 de GeoServer, agrupadas por tema ([plans/visor-a3.md](plans/visor-a3.md)).
 2. ¿Tolerancia para asignar puentes a la RN11?
 3. ¿Arquitectura (Intel o ARM) de las computadoras Windows? Las imágenes elegidas soportan ambas.

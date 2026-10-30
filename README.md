@@ -12,7 +12,7 @@ Trabajo práctico integrador de SIG (UTN FRRe, 2026) con las capas del SIG IGN 2
 |---|---|
 | A.1 Base de datos espacial | ✅ PostGIS con las 47 capas cargadas y controladas |
 | A.2 Servidor de mapas (WMS/WFS) | ✅ GeoServer con las 48 capas, estilos y edición por WFS-T verificados |
-| A.3 Visor web | En revisión: las 7 funciones con las 48 capas, tema claro/oscuro y Foco RN11 ([spec](docs/plans/visor-a3.md)) |
+| A.3 Visor web | ✅ Las 7 funciones, tablero RN11 con gráficos, preguntas en lenguaje natural que aprende ([visor-a3](docs/plans/visor-a3.md), [visor-inteligente](docs/plans/visor-inteligente.md)) |
 | B Análisis RN11 | Pendiente |
 | C Mapa A4 | Pendiente |
 
@@ -69,6 +69,8 @@ docker compose up -d web
 ```
 
 En los dos casos el proxy (Vite en desarrollo, `web/nginx.conf` en la demo) manda `/geoserver` a GeoServer y agrega las credenciales del `editor` solo en `/wfst`. Si se cambia la contraseña del editor en `.env`, actualizar también el base64 de `web/nginx.conf`.
+
+Preguntas en el buscador, por ejemplo: "localidades a menos de 10 km de la RN11", "población entre 10 y 20 km de la ruta 11", "puentes sobre la RN11", "escuelas en Chaco". Si no entiende una frase, propone parecidas y aprende la que elijas (tabla `edicion.aprendizaje`, compartida por el equipo). En una base creada antes del 29/10: `docker compose exec -T db psql -U postgres -d tpi -f - < sql/04_aprendizaje.sql` y `docker compose run --rm publicar`.
 
 Atajos del visor: `1`–`6` eligen herramienta (navegar, consulta por punto, por rectángulo, distancia, área, nueva obra), `/` o `⌘K` van al buscador central (lugares, capas, herramientas y el historial) y `Esc` vuelve a navegar.
 

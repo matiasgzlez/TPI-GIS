@@ -51,7 +51,7 @@ export default function FormObra({ visor, punto, guardando, onGuardar, onCancela
 
   return createPortal(
     <form
-      className="entra panel w-[360px] p-5 shadow-[var(--sombra-alta)]"
+      className="entra escalado panel w-[360px] p-5 shadow-[var(--sombra-alta)]"
       style={{ '--desde': '8px' } as React.CSSProperties}
       onSubmit={e => e.preventDefault()}
       onKeyDown={e => e.key === 'Escape' && onCancelar()}

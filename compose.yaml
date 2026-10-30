@@ -15,6 +15,7 @@ services:
       - ./sql/01_esquemas.sql:/docker-entrypoint-initdb.d/21_esquemas.sql:ro
       - ./sql/02_normalizar_nombres.sql:/docker-entrypoint-initdb.d/22_normalizar_nombres.sql:ro
       - ./sql/03_obras_rn11.sql:/docker-entrypoint-initdb.d/23_obras_rn11.sql:ro
+      - ./sql/04_aprendizaje.sql:/docker-entrypoint-initdb.d/24_aprendizaje.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s

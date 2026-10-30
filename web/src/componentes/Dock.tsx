@@ -18,7 +18,7 @@ export default function Dock({ modo, onModo }: Props) {
         {HERRAMIENTAS[modo].ayuda}
       </p>
       <FloatingDock
-        className="panel max-w-[calc(100vw-24px)] overflow-x-auto shadow-[var(--sombra-alta)]"
+        className="panel max-w-[calc(100cqw-24px)] overflow-x-auto shadow-[var(--sombra-alta)]"
         items={(Object.keys(HERRAMIENTAS) as Modo[]).map(m => {
           const Icono = ICONOS_HERRAMIENTA[m];
           return {

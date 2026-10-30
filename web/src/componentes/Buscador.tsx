@@ -1,10 +1,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@heroui/react';
-import { MagnifyingGlass, X, ClockCounterClockwise } from '@phosphor-icons/react';
+import { Binoculars, MagnifyingGlass, X, ClockCounterClockwise, Sparkle, ChatCircleText } from '@phosphor-icons/react';
 import GeoJSON from 'ol/format/GeoJSON';
 import { buffer } from 'ol/extent';
 import { URL_WFS, WORKSPACE } from '../config';
-import { borrarHistorial, buscar, DESTACADAS, guardarEnHistorial, leerHistorial, type Sugerencia } from '../comandos';
+import { borrarHistorial, buscar, DESTACADAS, guardarEnHistorial, leerHistorial, normalizar, type Sugerencia } from '../comandos';
+import { cargarAprendizaje } from '../aprendizaje';
+import { claveDe, describir, interpretar, masConsultadas, sugerir, type Interpretacion } from '../lenguaje';
 import type { Modo } from '../herramientas';
 import EscudoRuta from './EscudoRuta';
 import { ICONOS_ACCION, ICONOS_HERRAMIENTA, IconoCapa, IconoLugar } from './iconos';
@@ -18,12 +20,14 @@ interface Seccion {
 
 interface Props {
   capaPrendida: (nombre: string) => boolean;
+  // Consultas predichas según lo que se ve en el mapa.
+  enVista: Sugerencia[];
   onElegir: (sugerencia: Sugerencia) => void;
 }
 
 // Buscador central: con el campo vacío ofrece el historial y sugerencias; al escribir, acciones,
 // herramientas, capas y lugares (WFS sobre localidades, sin servicios externos).
-export default function Buscador({ capaPrendida, onElegir }: Props) {
+export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
   const [texto, setTexto] = useState('');
   const [abierto, setAbierto] = useState(false);
   const [activo, setActivo] = useState(0);
@@ -33,6 +37,12 @@ export default function Buscador({ capaPrendida, onElegir }: Props) {
   const entrada = useRef<HTMLInputElement>(null);
   const contenedor = useRef<HTMLDivElement>(null);
   const idLista = useId();
+  const [aprendido, setAprendido] = useState(0);
+
+  // Lo aprendido por el equipo (frases, sinónimos y lo más consultado) se trae una vez.
+  useEffect(() => {
+    cargarAprendizaje().then(() => setAprendido(n => n + 1));
+  }, []);
 
   // "/" o ⌘K desde cualquier parte del visor enfocan el buscador.
   useEffect(() => {
@@ -100,24 +110,38 @@ export default function Buscador({ capaPrendida, onElegir }: Props) {
   const secciones: Seccion[] = useMemo(() => {
     if (texto.trim().length === 0) {
       const destacadas = DESTACADAS.filter(d => !historial.some(h => h.id === d.id));
+      const populares = masConsultadas(3).map(i => pregunta(i)).filter(p => !historial.some(h => h.id === p.id));
       return [
+        { titulo: 'En esta vista', items: enVista },
         { titulo: 'Recientes', items: historial, borrable: true },
+        { titulo: 'Lo más consultado', items: populares },
         { titulo: 'Sugerencias', items: destacadas },
       ].filter(s => s.items.length);
     }
     const { acciones, capas } = buscar(texto);
+    // Preguntas: si se entiende, primero cómo se entendió; si no, "¿Quisiste decir?" (y se aprende
+    // de la elegida). Mientras se escribe, frases del árbol que completan lo escrito.
+    const palabras = normalizar(texto).split(' ').filter(Boolean).length;
+    const analisis = palabras >= 2 ? interpretar(texto) : undefined;
+    const entendida = analisis?.interpretacion;
+    const parecidas = palabras >= 2
+      ? sugerir(texto, 4).filter(i => !entendida || claveDe(i) !== claveDe(entendida)).slice(0, entendida ? 2 : 4)
+      : [];
+    const aprender = !entendida && analisis ? { frase: normalizar(texto), desconocidas: analisis.desconocidas } : undefined;
     return [
+      { titulo: 'Tu pregunta', items: entendida ? [pregunta(entendida)] : [] },
+      { titulo: entendida ? 'Otras preguntas' : palabras >= 3 ? '¿Quisiste decir…?' : 'Preguntas', items: parecidas.map(i => pregunta(i, aprender)) },
       { titulo: 'Acciones', items: acciones },
       { titulo: 'Capas', items: capas },
       { titulo: 'Lugares', items: lugares },
     ].filter(s => s.items.length);
-  }, [texto, lugares, historial]);
+  }, [texto, lugares, historial, aprendido, enVista]);
 
   const plano = secciones.flatMap(s => s.items);
   useEffect(() => setActivo(0), [texto]);
 
   function elegir(sugerencia: Sugerencia) {
-    guardarEnHistorial(sugerencia);
+    if (sugerencia.tipo !== 'pregunta' || sugerencia.interpretacion) guardarEnHistorial(sugerencia);
     setHistorial(leerHistorial());
     setTexto('');
     setAbierto(false);
@@ -159,7 +183,7 @@ export default function Buscador({ capaPrendida, onElegir }: Props) {
           }}
           onFocus={() => setAbierto(true)}
           onKeyDown={alPresionar}
-          placeholder={window.matchMedia('(min-width: 640px)').matches ? 'Buscá un lugar, una capa o una herramienta' : 'Buscar en el mapa'}
+          placeholder={window.matchMedia('(min-width: 640px)').matches ? 'Buscá o preguntá: "escuelas a menos de 10 km de la RN11"' : 'Buscá o preguntá'}
           aria-label="Buscar"
           role="combobox"
           aria-expanded={abierto}
@@ -187,7 +211,7 @@ export default function Buscador({ capaPrendida, onElegir }: Props) {
       </div>
 
       {abierto && (secciones.length > 0 || sinResultados) && (
-        <div id={idLista} role="listbox" aria-label="Sugerencias" className="despliega panel desplazable absolute inset-x-0 top-[68px] max-h-[min(560px,calc(100vh-120px))] overflow-y-auto p-2 shadow-[var(--sombra-alta)]">
+        <div id={idLista} role="listbox" aria-label="Sugerencias" className="despliega panel desplazable absolute inset-x-0 top-[68px] max-h-[min(560px,calc(100cqh-120px))] overflow-y-auto p-2 shadow-[var(--sombra-alta)]">
           {sinResultados && (
             <p className="px-4 py-6 text-[15px] leading-relaxed text-[var(--tinta-2)]">
               No encontramos “{texto.trim()}”. Probá con una localidad (Resistencia), una capa (ríos, puentes) o una herramienta (medir).
@@ -232,6 +256,17 @@ export default function Buscador({ capaPrendida, onElegir }: Props) {
       )}
     </div>
   );
+}
+
+function pregunta(i: Interpretacion, aprender?: Sugerencia['aprender']): Sugerencia {
+  return {
+    id: `pregunta:${claveDe(i)}`,
+    tipo: 'pregunta',
+    titulo: describir(i),
+    detalle: i.intencion === 'tablero' ? 'Abre el tablero de la RN11' : i.intencion === 'poblacion' ? 'Suma los habitantes y lista las localidades' : 'Consulta en GeoServer y resalta en el mapa',
+    interpretacion: i,
+    aprender,
+  };
 }
 
 interface FilaProps {
@@ -285,6 +320,8 @@ function Icono({ sugerencia }: { sugerencia: Sugerencia }) {
   }
   if (sugerencia.tipo === 'capa') return <IconoCapa size={20} />;
   if (sugerencia.tipo === 'lugar') return <IconoLugar size={20} />;
+  if (sugerencia.id.startsWith('vista:')) return <Binoculars size={20} />;
+  if (sugerencia.tipo === 'pregunta') return sugerencia.aprender ? <Sparkle size={20} /> : <ChatCircleText size={20} />;
   const Componente = ICONOS_ACCION[sugerencia.id] ?? IconoCapa;
   return <Componente size={20} />;
 }

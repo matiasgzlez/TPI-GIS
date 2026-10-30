@@ -1,9 +1,10 @@
 import { transformExtent } from 'ol/proj';
 import { GRUPOS } from './config';
 import { HERRAMIENTAS, type Modo } from './herramientas';
+import type { Interpretacion } from './lenguaje';
 
 // Lo que ofrece el buscador central: acciones del visor, herramientas, capas y lugares.
-export type TipoSugerencia = 'accion' | 'herramienta' | 'capa' | 'lugar';
+export type TipoSugerencia = 'accion' | 'herramienta' | 'capa' | 'lugar' | 'pregunta';
 
 export interface Sugerencia {
   id: string;
@@ -15,6 +16,9 @@ export interface Sugerencia {
   tecla?: string;
   // Lugares: la extensión a la que vuela el mapa.
   extension?: number[];
+  // Preguntas en lenguaje natural: la interpretación y, si vino de "¿Quisiste decir?", qué aprender.
+  interpretacion?: Interpretacion;
+  aprender?: { frase: string; desconocidas: string[] };
 }
 
 const ACCIONES: Sugerencia[] = [
@@ -44,7 +48,7 @@ const HERRAMIENTAS_SUGERIDAS: Sugerencia[] = (Object.keys(HERRAMIENTAS) as Modo[
 }));
 
 // Cómo se le dice a cada capa en la calle: "ríos" encuentra Cursos de agua.
-const SINONIMOS: Record<string, string> = {
+export const SINONIMOS: Record<string, string> = {
   curso_de_agua_hid: 'rio rios arroyo arroyos riacho agua',
   espejo_de_agua_hid: 'laguna lagunas lago lagos bañado estero agua',
   red_vial: 'ruta rutas camino caminos calle autopista',

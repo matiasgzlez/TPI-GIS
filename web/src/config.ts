@@ -134,6 +134,14 @@ export const GRUPOS: Grupo[] = [
 ];
 
 export const CAPAS: Capa[] = GRUPOS.flatMap(g => g.capas);
+
+// Combinaciones de capas listas para un tema.
+export const CONJUNTOS: { id: string; titulo: string; capas: string[] }[] = [
+  { id: 'rn11', titulo: 'Contexto RN11', capas: ['provincias', 'limite_politico_administrativo_lim', 'espejo_de_agua_hid', 'curso_de_agua_hid', 'red_vial', 'puente_red_vial_puntos', 'localidades', 'obras_rn11'] },
+  { id: 'agua', titulo: 'Hidrografía', capas: ['provincias', 'espejo_de_agua_hid', 'curso_de_agua_hid', 'isla', 'veg_hidrofila', 'infraestructura_hidro'] },
+  { id: 'transporte', titulo: 'Transporte', capas: ['provincias', 'red_vial', 'vias_secundarias', 'red_ferroviaria', 'puente_red_vial_puntos', 'infraestructura_aeroportuaria_punto', 'localidades'] },
+  { id: 'servicios', titulo: 'Servicios', capas: ['provincias', 'red_vial', 'localidades', 'edif_educacion', 'edificio_de_salud_ips', 'edificio_de_seguridad_ips'] },
+];
 export const tituloDeCapa = (nombre: string) => CAPAS.find(c => c.nombre === nombre)?.titulo ?? nombre;
 
 export const EXTENSION_CHACO = transformExtent([-63.5, -28.1, -58.3, -24.0], 'EPSG:4326', 'EPSG:3857');

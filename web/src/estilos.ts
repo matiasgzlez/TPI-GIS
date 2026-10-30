@@ -35,6 +35,11 @@ function capa(nombre: string, reglas?: Regla[], conTitulos = false) {
 const sld = (capas: string) =>
   `<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc">${capas}</StyledLayerDescriptor>`;
 
+// Un punto chico con borde blanco; las capas densas aparecen recién al acercarse.
+const punto = (relleno: string, tamano = 7, forma = 'circle') =>
+  `<PointSymbolizer><Graphic><Mark><WellKnownName>${forma}</WellKnownName><Fill>${parametro('fill', relleno)}</Fill>`
+  + `<Stroke>${parametro('stroke', '#ffffff')}${parametro('stroke-width', 1.2)}</Stroke></Mark><Size>${tamano}</Size></Graphic></PointSymbolizer>`;
+
 const AGUA = '#5f97bf';
 const AGUA_CLARA = '#a9c9de';
 
@@ -56,6 +61,12 @@ const REGLAS: Record<string, Regla[]> = {
     { titulo: 'Costa', filtro: igual('tipo', 'Costa'), simbolo: linea(AGUA, 0.8, undefined, 0.7) },
   ],
   isla: [{ titulo: 'Isla', simbolo: relleno('#dfe3d5') }],
+  edif_educacion: [{ titulo: 'Establecimiento educativo', hasta: 1_500_000, simbolo: punto('#3d6fb0', 7) }],
+  edificio_de_salud_ips: [{ titulo: 'Establecimiento de salud', hasta: 3_000_000, simbolo: punto('#2f8f6b', 9, 'cross') }],
+  edificio_de_seguridad_ips: [{ titulo: 'Seguridad', hasta: 1_500_000, simbolo: punto('#5b5f66', 7, 'square') }],
+  otras_edificaciones: [{ titulo: 'Edificación', hasta: 250_000, simbolo: punto('#8a8f96', 5) }],
+  marcas_y_senales: [{ titulo: 'Marca o señal', hasta: 750_000, simbolo: punto('#8a8f96', 5) }],
+  puntos_del_terreno: [{ titulo: 'Punto del terreno', hasta: 750_000, simbolo: punto('#9a7b4f', 5) }],
 };
 
 // Un solo SLD con todas las capas prendidas, en orden de dibujo: GeoServer devuelve una imagen por

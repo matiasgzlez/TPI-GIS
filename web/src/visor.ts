@@ -13,7 +13,10 @@ import { getPointResolution, toLonLat } from 'ol/proj';
 import { getCenter } from 'ol/extent';
 import type { Coordinate } from 'ol/coordinate';
 import { Circle, Fill, Stroke, Style, Text } from 'ol/style';
+import { getVectorContext } from 'ol/render';
+import type RenderEvent from 'ol/render/Event';
 import { sldDeCapas, sldDeLeyenda } from './estilos';
+import { escalaActual, movimientoReducido } from './preferencias';
 import { CAPAS, EXTENSION_CHACO, FILTRO_RN11, URL_WFS, URL_WMS, WORKSPACE } from './config';
 
 // Todo lo que las herramientas y los paneles necesitan del mapa.
@@ -22,6 +25,9 @@ export interface Visor {
   // Las capas prendidas de GeoServer se piden juntas: una imagen por tesela, no una por capa.
   wms: TileLayer<TileWMS>;
   visibles: Set<string>;
+  // Capas con opacidad propia (menos de 1): salen de la imagen combinada a una capa WMS cada una.
+  opacidades: Record<string, number>;
+  sueltas: Record<string, TileLayer<TileWMS>>;
   suscriptores: Set<() => void>;
   // Entidades devueltas por una consulta.
   resaltado: VectorSource;
@@ -30,6 +36,8 @@ export interface Visor {
   // Lo que dibuja el usuario: medición o el punto de una obra nueva.
   dibujo: VectorSource;
   rn11: VectorLayer<VectorSource>;
+  // Tablero de la RN11: bandas de 10 y 20 km, localidades por franja y puentes.
+  analisis: VectorSource;
   cuadricula: Graticule;
 }
 
@@ -45,7 +53,7 @@ export const CAPAS_INICIALES = CAPAS.filter(c => c.visible).map(c => c.nombre);
 
 
 // Colores de las capas propias del visor. Se leen de las variables CSS del tema activo.
-const paleta = { acento: '#e5521f', tinta: '#15171a', papel: '#eceeeb', grilla: 'rgba(21,23,26,.06)' };
+const paleta = { acento: '#e5521f', tinta: '#15171a', papel: '#eceeeb', grilla: 'rgba(21,23,26,.06)', dato1: '#c2410c', dato2: '#ec8455' };
 
 function leerPaleta() {
   const css = getComputedStyle(document.documentElement);
@@ -54,6 +62,8 @@ function leerPaleta() {
   paleta.tinta = v('--tinta') || paleta.tinta;
   paleta.papel = v('--papel') || paleta.papel;
   paleta.grilla = v('--grilla') || paleta.grilla;
+  paleta.dato1 = v('--dato-1') || paleta.dato1;
+  paleta.dato2 = v('--dato-2') || paleta.dato2;
 }
 
 const estiloResaltado = () => [
@@ -81,12 +91,45 @@ const estiloFoco = () => [
   }),
 ];
 
-// La RN11 se dibuja como una ruta señalizada: halo del color del papel y trazo vial encima.
+// La RN11 se dibuja como una ruta señalizada: halo del color del papel y trazo vial encima. El zIndex
+// ordena por pasada entre todos los tramos (primero todos los halos, al final todos los trazos), así el
+// borde de un tramo no tapa la unión con el siguiente.
 const estiloRn11 = () => [
-  new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.acento, 0.18), width: 18, lineCap: 'round', lineJoin: 'round' }) }),
-  new Style({ stroke: new Stroke({ color: paleta.papel, width: 8, lineCap: 'round', lineJoin: 'round' }) }),
-  new Style({ stroke: new Stroke({ color: paleta.acento, width: 4, lineCap: 'round', lineJoin: 'round' }) }),
+  new Style({ zIndex: 1, stroke: new Stroke({ color: hacerTransparente(paleta.acento, 0.18), width: 18, lineCap: 'round', lineJoin: 'round' }) }),
+  new Style({ zIndex: 2, stroke: new Stroke({ color: paleta.papel, width: 8, lineCap: 'round', lineJoin: 'round' }) }),
+  new Style({ zIndex: 3, stroke: new Stroke({ color: paleta.acento, width: 4, lineCap: 'round', lineJoin: 'round' }) }),
 ];
+
+// Bandas de 10 y 20 km alrededor de la traza: la misma línea con un ancho en metros reales, que con
+// extremos y uniones redondeados es exactamente el área de influencia. En EPSG:3857 un metro de
+// terreno mide 1/cos(latitud) metros proyectados; la RN11 en Chaco anda por los 27° S.
+const COS_LATITUD_RN11 = Math.cos((27 * Math.PI) / 180);
+const ancho = (metros: number, resolucion: number) => (2 * metros) / COS_LATITUD_RN11 / resolucion;
+
+function estiloAnalisis(feature: import('ol/Feature').FeatureLike, resolucion: number) {
+  const tipo = feature.get('tipo_analisis');
+  if (tipo === 'traza') {
+    return [
+      new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato2, 0.16), width: ancho(20_000, resolucion), lineCap: 'round', lineJoin: 'round' }) }),
+      new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato1, 0.16), width: ancho(10_000, resolucion), lineCap: 'round', lineJoin: 'round' }) }),
+    ];
+  }
+  if (tipo === 'localidad') {
+    const habitantes = Number(feature.get('habitantes')) || 0;
+    const radio = Math.min(5 + Math.sqrt(habitantes) / 28, 22);
+    return new Style({
+      image: new Circle({
+        radius: radio,
+        fill: new Fill({ color: hacerTransparente(feature.get('franja') === 1 ? paleta.dato1 : paleta.dato2, 0.85) }),
+        stroke: new Stroke({ color: paleta.papel, width: 2 }),
+      }),
+      zIndex: 100 - radio,
+    });
+  }
+  return new Style({
+    image: new Circle({ radius: 5, fill: new Fill({ color: paleta.tinta }), stroke: new Stroke({ color: paleta.papel, width: 2 }) }),
+  });
+}
 
 export const estiloDibujo = () => [
   new Style({
@@ -123,14 +166,12 @@ function crearCuadricula() {
 // las cookies que el navegador manda a localhost pasaba el límite de cabeceras de Node y de Tomcat
 // (error 431) y el mapa quedaba vacío. En la URL va solo un hash del estilo, que distingue cada
 // combinación de capas para la caché de nginx.
-let sldActual = '';
-
-function cargarTesela(tesela: ImageTile, url: string) {
+function cargarTesela(tesela: ImageTile, url: string, sld: string) {
   const imagen = tesela.getImage() as HTMLImageElement;
   fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ SLD_BODY: sldActual }),
+    body: new URLSearchParams({ SLD_BODY: sld }),
   })
     .then(respuesta => {
       if (!respuesta.ok || !respuesta.headers.get('content-type')?.startsWith('image/')) throw new Error(String(respuesta.status));
@@ -151,19 +192,30 @@ function hashCorto(texto: string) {
 }
 
 function crearCapaWms() {
+  // El SLD vive en la propia fuente: cada capa WMS (la combinada y las que tienen opacidad propia)
+  // pide sus teselas con el suyo.
+  const fuente: TileWMS = new TileWMS({
+    url: URL_WMS,
+    params: { TILED: true },
+    transition: 200,
+    tileLoadFunction: (tesela, url) => cargarTesela(tesela as ImageTile, url, fuente.get('sld') ?? ''),
+  });
   return new TileLayer({
     // Las teselas WMS tienen un canvas con clase propia: en tema oscuro se invierten por CSS.
     className: 'capa-wms',
     zIndex: 10,
     // Mientras llegan las teselas nuevas se ve el nivel de menor resolución, no huecos.
     preload: 1,
-    source: new TileWMS({
-      url: URL_WMS,
-      params: { TILED: true },
-      transition: 200,
-      tileLoadFunction: (tesela, url) => cargarTesela(tesela as ImageTile, url),
-    }),
+    source: fuente,
   });
+}
+
+function ponerSld(capa: TileLayer<TileWMS>, nombres: string[]) {
+  const sld = sldDeCapas(nombres);
+  const fuente = capa.getSource()!;
+  if (fuente.get('sld') === sld) return;
+  fuente.set('sld', sld);
+  fuente.updateParams({ ESTILO: hashCorto(sld) });
 }
 
 export function crearVisor(destino: HTMLElement): Visor {
@@ -174,15 +226,19 @@ export function crearVisor(destino: HTMLElement): Visor {
   const dibujo = new VectorSource();
   const rn11 = new VectorLayer({ source: new VectorSource(), style: estiloRn11, zIndex: 35, visible: false });
   const cuadricula = crearCuadricula();
+  const capaFoco = new VectorLayer({ source: foco, style: estiloFoco, zIndex: 55 });
+  const analisis = new VectorSource();
+  const capaAnalisis = new VectorLayer({ source: analisis, style: estiloAnalisis, zIndex: 32, updateWhileAnimating: true });
 
   const mapa = new Map({
     target: destino,
     layers: [
       cuadricula,
       wms,
+      capaAnalisis,
       rn11,
       new VectorLayer({ source: resaltado, style: estiloResaltado, zIndex: 50 }),
-      new VectorLayer({ source: foco, style: estiloFoco, zIndex: 55 }),
+      capaFoco,
       new VectorLayer({ source: dibujo, style: estiloDibujo, zIndex: 60 }),
     ],
     view: new View({ maxZoom: 19, minZoom: 3 }),
@@ -195,9 +251,39 @@ export function crearVisor(destino: HTMLElement): Visor {
   vista.setZoom(vista.getZoom()! - 1);
   vista.setCenter(getCenter(EXTENSION_CHACO));
 
-  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), suscriptores: new Set(), resaltado, foco, dibujo, rn11, cuadricula };
+  capaFoco.on('postrender', e => latir(e, foco, mapa));
+  foco.on('addfeature', () => {
+    inicioLatido = Date.now();
+    mapa.render();
+  });
+
+  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, rn11, analisis, cuadricula };
   actualizarWms(visor);
   return visor;
+}
+
+// La entidad seleccionada late: un anillo (o un halo en líneas y polígonos) que se expande y se
+// desvanece cada 1,6 s durante unos segundos, para encontrarla de un vistazo. Después queda quieta
+// (el mapa deja de redibujarse) y con movimiento reducido no late.
+const DURACION_LATIDO = 4800;
+let inicioLatido = 0;
+
+function latir(evento: RenderEvent, fuente: VectorSource, mapa: Map) {
+  const entidades = fuente.getFeatures();
+  if (!entidades.length || movimientoReducido() || Date.now() - inicioLatido > DURACION_LATIDO) return;
+  const t = (Date.now() % 1600) / 1600;
+  const suave = 1 - (1 - t) ** 3;
+  const contexto = getVectorContext(evento);
+  const color = hacerTransparente(paleta.acento, 0.55 * (1 - t));
+  for (const entidad of entidades) {
+    const geometria = entidad.getGeometry();
+    if (!geometria) continue;
+    contexto.setStyle(geometria.getType() === 'Point'
+      ? new Style({ image: new Circle({ radius: 8 + suave * 26, stroke: new Stroke({ color, width: 3 }) }) })
+      : new Style({ stroke: new Stroke({ color, width: 6 + suave * 18, lineJoin: 'round', lineCap: 'round' }) }));
+    contexto.drawGeometry(geometria);
+  }
+  mapa.render();
 }
 
 // --- Capas prendidas ---
@@ -221,27 +307,62 @@ export function restablecerCapas(visor: Visor) {
   actualizarWms(visor);
 }
 
+export function verSolo(visor: Visor, nombre: string) {
+  visor.visibles = new Set([nombre]);
+  actualizarWms(visor);
+}
+
+export function ponerCapas(visor: Visor, nombres: string[]) {
+  visor.visibles = new Set(nombres);
+  actualizarWms(visor);
+}
+
+export function cambiarOpacidad(visor: Visor, nombre: string, opacidad: number) {
+  if (opacidad >= 0.99) delete visor.opacidades[nombre];
+  else visor.opacidades[nombre] = opacidad;
+  actualizarWms(visor);
+}
+
 function actualizarWms(visor: Visor) {
   const nombres = capasVisibles(visor);
-  visor.wms.setVisible(nombres.length > 0);
-  if (nombres.length) {
-    sldActual = sldDeCapas(nombres);
-    visor.wms.getSource()!.updateParams({ ESTILO: hashCorto(sldActual) });
+  const combinadas = nombres.filter(n => visor.opacidades[n] === undefined);
+  visor.wms.setVisible(combinadas.length > 0);
+  if (combinadas.length) ponerSld(visor.wms, combinadas);
+
+  // Las sueltas se dibujan arriba de la combinada, en su orden de dibujo entre ellas.
+  for (const [nombre, capa] of Object.entries(visor.sueltas)) {
+    if (!visor.visibles.has(nombre) || visor.opacidades[nombre] === undefined) {
+      visor.mapa.removeLayer(capa);
+      delete visor.sueltas[nombre];
+    }
   }
+  nombres.forEach((nombre, i) => {
+    const opacidad = visor.opacidades[nombre];
+    if (opacidad === undefined) return;
+    let capa = visor.sueltas[nombre];
+    if (!capa) {
+      capa = crearCapaWms();
+      visor.sueltas[nombre] = capa;
+      visor.mapa.addLayer(capa);
+      ponerSld(capa, [nombre]);
+    }
+    capa.setOpacity(opacidad);
+    capa.setZIndex(10 + (i + 1) / (nombres.length + 1));
+  });
   visor.suscriptores.forEach(aviso => aviso());
 }
 
 // Después de un WFS-T: el parámetro nuevo hace que se pidan teselas nuevas (y saltea la caché).
 export function refrescarMapa(visor: Visor) {
-  visor.wms.getSource()!.updateParams({ _: Date.now() });
+  [visor.wms, ...Object.values(visor.sueltas)].forEach(c => c.getSource()!.updateParams({ _: Date.now() }));
 }
 
 // GetFeatureInfo sin estilos: con una fuente aparte, solo para armar la URL.
 const fuenteConsulta = new TileWMS({ url: URL_WMS, params: {} });
-export function urlConsultaPunto(visor: Visor, coordenada: Coordinate, nombres: string[]) {
+export function urlConsultaPunto(visor: Visor, coordenada: Coordinate, nombres: string[], maximo = 10) {
   const capas = nombres.map(n => `${WORKSPACE}:${n}`).join(',');
   return fuenteConsulta.getFeatureInfoUrl(coordenada, visor.mapa.getView().getResolution()!, 'EPSG:3857', {
-    LAYERS: capas, QUERY_LAYERS: capas, INFO_FORMAT: 'application/json', FEATURE_COUNT: 10,
+    LAYERS: capas, QUERY_LAYERS: capas, INFO_FORMAT: 'application/json', FEATURE_COUNT: maximo,
   })!;
 }
 
@@ -286,7 +407,6 @@ export function formatoCoordenada(coordenada: Coordinate) {
   return `${gms(lat, 'N', 'S')}  ${gms(lon, 'E', 'O')}`;
 }
 
-const reducido = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: number; duracion?: number } = {}) {
   const vista = visor.mapa.getView();
@@ -295,7 +415,7 @@ export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: 
     size: visor.mapa.getSize(),
     padding: margenesMapa(),
     maxZoom: opciones.maxZoom ?? 14,
-    duration: reducido() ? 0 : opciones.duracion ?? 900,
+    duration: movimientoReducido() ? 0 : opciones.duracion ?? 900,
   });
 }
 
@@ -304,7 +424,8 @@ export const verChaco = (visor: Visor, duracion?: number) => volarA(visor, EXTEN
 // Los paneles tapan los bordes del mapa: el encuadre deja ese espacio libre.
 function margenesMapa(): [number, number, number, number] {
   if (window.innerWidth < 768) return [150, 20, 190, 20];
-  return [110, 120, 130, 400];
+  const escala = escalaActual();
+  return [110, 120, 130, 400].map(m => Math.round(m * escala)) as [number, number, number, number];
 }
 
 // Polígono de Chaco simplificado en WKT. GeoServer no tiene la extensión querylayer, así que el

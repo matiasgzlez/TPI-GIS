@@ -37,8 +37,10 @@ export interface ResultadoCapa {
 }
 
 export interface Consulta {
-  origen: 'punto' | 'rectangulo';
+  origen: 'punto' | 'rectangulo' | 'lenguaje';
   capas: ResultadoCapa[];
+  // Consultas en lenguaje natural: la pregunta como la entendió el visor.
+  titulo?: string;
 }
 
 export interface Medicion {
@@ -186,6 +188,15 @@ async function consultarRectangulo(visor: Visor, extension: number[]): Promise<C
   return { origen: 'rectangulo', capas: mostrar(visor, resultados.filter(r => r.total > 0)) };
 }
 
+// Una capa dentro de una extensión (la vista actual): lo usan las consultas predichas.
+export async function consultarCapaEnExtension(visor: Visor, capa: string, extension: number[]): Promise<Consulta> {
+  const url = `${URL_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=${WORKSPACE}:${capa}`
+    + `&outputFormat=application/json&srsName=EPSG:3857&count=${LIMITE_POR_CAPA}&bbox=${extension.join(',')},EPSG:3857`;
+  const datos = await pedirJson(url);
+  const resultado = armarResultado(capa, datos.numberMatched ?? datos.features.length, datos);
+  return { origen: 'rectangulo', titulo: `${tituloDeCapa(capa)} en esta vista`, capas: mostrar(visor, resultado.total ? [resultado] : []) };
+}
+
 async function pedirJson(url: string) {
   const respuesta = await fetch(url);
   const texto = await respuesta.text();
@@ -200,7 +211,7 @@ const OCULTOS = new Set([
   'signo', 'operador', 'responsabl', 'cargo', 'dataset', 'fclass', 'sp', 'datum', 'ac', 't_act', 'coord', 'progreso', 'actualizac',
 ]);
 
-function armarResultado(capa: string, total: number, datos: { features: FeatureGeoJSON[] }): ResultadoCapa {
+export function armarResultado(capa: string, total: number, datos: { features: FeatureGeoJSON[] }): ResultadoCapa {
   const features = new GeoJSON().readFeatures(datos, { dataProjection: 'EPSG:3857' });
   return {
     capa,
@@ -216,9 +227,13 @@ function armarResultado(capa: string, total: number, datos: { features: FeatureG
   };
 }
 
-function mostrar(visor: Visor, capas: ResultadoCapa[]) {
+// Las capas que cubren todo (provincias, países) se listan pero no se resaltan: su contorno taparía
+// lo que de verdad se consultó.
+const SIN_RESALTAR = new Set(['provincias', 'pais_lim']);
+
+export function mostrar(visor: Visor, capas: ResultadoCapa[]) {
   visor.resaltado.clear();
   visor.foco.clear();
-  visor.resaltado.addFeatures(capas.flatMap(c => c.entidades.map(e => e.feature)));
+  visor.resaltado.addFeatures(capas.filter(c => !SIN_RESALTAR.has(c.capa)).flatMap(c => c.entidades.map(e => e.feature)));
   return capas;
 }

@@ -1,8 +1,11 @@
 import { useEffect, useReducer, useState } from 'react';
 import { Switch } from '@heroui/react';
-import { ArrowCounterClockwise, CaretDown, EyeSlash } from '@phosphor-icons/react';
-import { CAPAS, GRUPOS, type Geometria } from '../config';
-import { cambiarCapas, cargarLeyenda, restablecerCapas, suscribirCapas, type Visor } from '../visor';
+import { ArrowCounterClockwise, CaretDown, Eye, EyeSlash, MagnifyingGlass, SlidersHorizontal, X } from '@phosphor-icons/react';
+import { AnimatePresence, motion } from 'motion/react';
+import { CAPAS, CONJUNTOS, GRUPOS, type Geometria } from '../config';
+import { normalizar, SINONIMOS } from '../comandos';
+import { RESORTE_PANEL } from '../movimiento';
+import { cambiarCapas, cambiarOpacidad, cargarLeyenda, ponerCapas, restablecerCapas, suscribirCapas, verSolo, type Visor } from '../visor';
 
 interface Props {
   visor: Visor;
@@ -15,6 +18,8 @@ export default function PanelCapas({ visor, plegable }: Props) {
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
   const [abiertos, setAbiertos] = useState<Set<string>>(() => new Set(['proyecto', 'limites', 'transporte', 'hidrografia']));
   const [desplegado, setDesplegado] = useState(!plegable);
+  const [filtro, setFiltro] = useState('');
+  const [ajustando, setAjustando] = useState<string | null>(null);
 
   // La visibilidad vive en el visor; el panel solo la refleja.
   useEffect(() => suscribirCapas(visor, redibujar), [visor]);
@@ -51,14 +56,50 @@ export default function PanelCapas({ visor, plegable }: Props) {
             <EyeSlash size={17} />
           </BotonTexto>
         </div>
+        {desplegado && (
+          <>
+            <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Conjuntos de capas">
+              {CONJUNTOS.map(c => {
+                const activo = c.capas.length === visor.visibles.size && c.capas.every(n => visor.visibles.has(n));
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => ponerCapas(visor, c.capas)}
+                    aria-pressed={activo}
+                    className={`h-8 rounded-full px-3 text-[13px] font-medium transition-colors ${activo ? 'bg-[var(--tinta)] text-[var(--superficie)]' : 'bg-[var(--superficie-2)] text-[var(--tinta-2)] hover:bg-[var(--superficie-3)] hover:text-[var(--tinta)]'}`}
+                  >
+                    {c.titulo}
+                  </button>
+                );
+              })}
+            </div>
+            <label className="mt-3 flex h-10 items-center gap-2 rounded-xl bg-[var(--superficie-2)] px-3">
+              <MagnifyingGlass size={16} className="shrink-0 text-[var(--tinta-3)]" />
+              <input
+                value={filtro}
+                onChange={e => setFiltro(e.target.value)}
+                placeholder="Filtrar las 48 capas"
+                aria-label="Filtrar capas"
+                className="h-full min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[var(--tinta-3)]"
+              />
+              {filtro && <button type="button" onClick={() => setFiltro('')} aria-label="Borrar filtro" className="text-[var(--tinta-3)] hover:text-[var(--tinta)]"><X size={15} /></button>}
+            </label>
+          </>
+        )}
       </header>
 
       {desplegado && (
         <div className="desplazable min-h-0 flex-1 overflow-y-auto border-t border-[var(--linea)] px-2 pb-3 pt-1.5">
+          {filtro && !GRUPOS.some(g => g.capas.some(c => coincide(c.nombre, c.titulo, g.titulo, filtro))) && (
+            <p className="px-3 py-4 text-[14px] text-[var(--tinta-2)]">Ninguna capa coincide con “{filtro}”.</p>
+          )}
           {GRUPOS.map(grupo => {
+            const capasGrupo = filtro ? grupo.capas.filter(c => coincide(c.nombre, c.titulo, grupo.titulo, filtro)) : grupo.capas;
+            if (!capasGrupo.length) return null;
             const nombres = grupo.capas.map(c => c.nombre);
             const cuantas = nombres.filter(n => visor.visibles.has(n)).length;
-            const abierto = abiertos.has(grupo.id);
+            const abierto = !!filtro || abiertos.has(grupo.id);
             return (
               <div key={grupo.id} className="py-0.5">
                 <div className="flex items-center gap-1 rounded-xl pr-3 hover:bg-[var(--superficie-2)]">
@@ -68,7 +109,7 @@ export default function PanelCapas({ visor, plegable }: Props) {
                     aria-expanded={abierto}
                     className="flex min-h-[50px] flex-1 items-center gap-2.5 rounded-xl pl-3 text-left"
                   >
-                    <CaretDown size={13} weight="bold" className={`shrink-0 text-[var(--tinta-3)] transition-transform duration-300 ${abierto ? '' : '-rotate-90'}`} />
+                    <CaretDown size={13} weight="bold" className={`shrink-0 text-[var(--tinta-3)] transition-transform duration-[420ms] ease-[var(--ios)] ${abierto ? '' : '-rotate-90'}`} />
                     <span className="flex-1 text-[15px] font-semibold">{grupo.titulo}</span>
                     <span className={`text-[13px] font-medium ${cuantas ? 'text-[var(--tinta-2)]' : 'text-[var(--tinta-3)]'}`}>
                       {cuantas}/{grupo.capas.length}
@@ -85,9 +126,9 @@ export default function PanelCapas({ visor, plegable }: Props) {
                   </Switch>
                 </div>
 
-                <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${abierto ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                <div className={`grid transition-[grid-template-rows] duration-[420ms] ease-[var(--ios)] ${abierto ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                   <ul className="overflow-hidden" inert={!abierto}>
-                    {grupo.capas.map(capa => {
+                    {capasGrupo.map(capa => {
                       const visible = visor.visibles.has(capa.nombre);
                       return (
                         <li key={capa.nombre}>
@@ -100,7 +141,34 @@ export default function PanelCapas({ visor, plegable }: Props) {
                               <Switch.Control><Switch.Thumb /></Switch.Control>
                             </Switch.Content>
                           </Switch>
-                          {visible && <Leyenda nombre={capa.nombre} titulo={capa.titulo} />}
+                          {visible && (
+                            <div className="flex items-start gap-2 pr-3">
+                              <Leyenda nombre={capa.nombre} titulo={capa.titulo} />
+                              <button
+                                type="button"
+                                onClick={() => setAjustando(ajustando === capa.nombre ? null : capa.nombre)}
+                                aria-expanded={ajustando === capa.nombre}
+                                aria-label={`Ajustar ${capa.titulo}`}
+                                title="Opacidad y ver solo esta"
+                                className={`ml-auto grid size-8 shrink-0 place-items-center rounded-lg transition-colors ${ajustando === capa.nombre ? 'bg-[var(--superficie-3)] text-[var(--tinta)]' : 'text-[var(--tinta-3)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]'}`}
+                              >
+                                <SlidersHorizontal size={16} />
+                              </button>
+                            </div>
+                          )}
+                          <AnimatePresence initial={false}>
+                            {visible && ajustando === capa.nombre && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={RESORTE_PANEL}
+                                className="overflow-hidden"
+                              >
+                                <Ajustes visor={visor} nombre={capa.nombre} />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </li>
                       );
                     })}
@@ -133,6 +201,38 @@ function BotonTexto({ etiqueta, onPress, deshabilitado, soloIcono, children }: {
   );
 }
 
+const coincide = (nombre: string, titulo: string, grupo: string, filtro: string) =>
+  normalizar(`${titulo} ${grupo} ${SINONIMOS[nombre] ?? ''}`).includes(normalizar(filtro));
+
+// Opacidad y "ver solo esta" de una capa prendida.
+function Ajustes({ visor, nombre }: { visor: Visor; nombre: string }) {
+  const opacidad = visor.opacidades[nombre] ?? 1;
+  return (
+    <div className="mx-3 mb-2 ml-[52px] rounded-xl bg-[var(--superficie-2)] px-3.5 py-3">
+      <label className="block">
+        <span className="flex items-baseline justify-between text-[13px]">
+          <span className="font-medium text-[var(--tinta-2)]">Opacidad</span>
+          <span className="font-semibold">{Math.round(opacidad * 100)} %</span>
+        </span>
+        <input
+          type="range" min={10} max={100} step={5}
+          value={Math.round(opacidad * 100)}
+          onChange={e => cambiarOpacidad(visor, nombre, Number(e.target.value) / 100)}
+          className="deslizador mt-2 w-full"
+          aria-label="Opacidad"
+        />
+      </label>
+      <button
+        type="button"
+        onClick={() => verSolo(visor, nombre)}
+        className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[var(--superficie)] text-[13px] font-medium hover:bg-[var(--superficie-3)]"
+      >
+        <Eye size={15} /> Ver solo esta capa
+      </button>
+    </div>
+  );
+}
+
 function Leyenda({ nombre, titulo }: { nombre: string; titulo: string }) {
   const [src, setSrc] = useState<string>();
   useEffect(() => {
@@ -144,7 +244,7 @@ function Leyenda({ nombre, titulo }: { nombre: string; titulo: string }) {
     if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
   }, [src]);
   if (!src) return null;
-  return <img className="leyenda-wms mb-2 ml-[58px] block max-w-[230px]" alt={`Leyenda de ${titulo}`} src={src} />;
+  return <img className="leyenda-wms mb-2 ml-[58px] block max-w-[200px]" alt={`Leyenda de ${titulo}`} src={src} />;
 }
 
 // Un glifo por tipo de geometría: dice qué se va a ver antes de prenderla.

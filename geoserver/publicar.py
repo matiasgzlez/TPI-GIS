@@ -31,6 +31,7 @@ STORES = {
 }
 TITULOS_EDICION = {
     "obras_rn11": ("Obras de mantenimiento RN11", "Intervenciones de mantenimiento sobre la RN11 en Chaco, cargadas desde el visor web"),
+    "aprendizaje": ("Aprendizaje del buscador", "Frases, sinónimos y consultas que aprende el buscador en lenguaje natural del visor web"),
 }
 # Las capas de edición arrancan vacías: sin una extensión fija GeoServer usaría 0,0.
 # Extensión de la provincia del Chaco en ign.provincias, redondeada hacia afuera.

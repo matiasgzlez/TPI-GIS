@@ -7,6 +7,7 @@
 import { cn } from "@/lib/utils";
 import { type MotionValue, motion, useMotionValue, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useRef } from "react";
+import { RESORTE } from "../../movimiento";
 
 export interface ItemDock {
   id: string;
@@ -50,23 +51,30 @@ function IconContainer({ mouseX, item }: { mouseX: MotionValue<number>; item: It
   const escala = useSpring(escalaObjetivo, { mass: 0.1, stiffness: 190, damping: 14 });
 
   return (
-    <motion.button
+    <button
       ref={ref}
       type="button"
       aria-pressed={item.activo}
       aria-keyshortcuts={item.tecla}
       title={item.tecla ? `${item.title} (${item.tecla})` : item.title}
       onClick={item.onClick}
-      style={{ scale: escala }}
       className={cn(
-        "relative flex h-[66px] w-[84px] shrink-0 flex-col items-center justify-center gap-1.5 rounded-[14px] max-xl:w-[66px] max-xl:[&>span:last-child]:text-[12px] transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2",
+        "relative flex h-[66px] w-[84px] shrink-0 flex-col items-center justify-center gap-1.5 rounded-[14px] max-xl:w-[66px] transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2",
         item.activo
-          ? "bg-[var(--tinta)] text-[var(--superficie)]"
+          ? "text-[var(--superficie)]"
           : "text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]",
       )}
     >
-      <span className="flex size-6 items-center justify-center [&>svg]:size-full">{item.icon(!!item.activo)}</span>
-      <span className="text-[13px] font-medium leading-none">{item.title}</span>
-    </motion.button>
+      {/* La pastilla de la herramienta activa se desliza de un botón a otro (layoutId). */}
+      {item.activo && (
+        <motion.span layoutId="dock-activo" transition={RESORTE} className="absolute inset-0 z-0 rounded-[14px] bg-[var(--tinta)]" />
+      )}
+      {/* La magnificación va en el contenido y no en el botón: así el botón no crea su propio contexto
+          de apilado y la pastilla, al deslizarse, pasa por debajo de los nombres de los vecinos. */}
+      <motion.span style={{ scale: escala }} className="relative z-10 flex flex-col items-center gap-1.5">
+        <span className="flex size-6 items-center justify-center [&>svg]:size-full">{item.icon(!!item.activo)}</span>
+        <span className="text-[13px] font-medium leading-none max-xl:text-[12px]">{item.title}</span>
+      </motion.span>
+    </button>
   );
 }

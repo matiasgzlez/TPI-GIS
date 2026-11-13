@@ -2,14 +2,29 @@ import Feature from 'ol/Feature';
 import GeoJSON from 'ol/format/GeoJSON';
 import { toLonLat } from 'ol/proj';
 import type { Point } from 'ol/geom';
-import { FILTRO_RN11, URL_WFS, WORKSPACE } from './config';
+import type { Coordinate } from 'ol/coordinate';
+import { URL_WFS, WORKSPACE } from './config';
 import { distanciaALineas, longitud, recortar, type Linea, type LonLat, type Poligono } from './geodesia';
 
-// Las preguntas de la parte B, respondidas en vivo: longitud de la RN11 en Chaco, población en las
-// franjas excluyentes de 0–10 km y 10–20 km, y puentes sobre la traza. GeoServer da los candidatos con
-// margen (DWithin aproxima metros en grados) y la distancia exacta se calcula acá (geodesia.ts).
+// Las preguntas de la parte B, respondidas en vivo para cualquier ruta nacional dentro de una provincia:
+// longitud de la traza, población en las franjas excluyentes de 0–10 km y 10–20 km, y puentes sobre la
+// traza. La RN11 en Chaco es la del trabajo; las demás se eligen con doble clic sobre el mapa.
+// GeoServer da los candidatos con margen (DWithin aproxima metros en grados) y la distancia exacta se
+// calcula acá (geodesia.ts).
 
 export const RADIOS = { franja1: 10_000, franja2: 20_000, puentes: 100 };
+
+export interface Ruta {
+  numero: string;
+  provincia: string;
+}
+
+export const RN11: Ruta = { numero: '11', provincia: 'Chaco' };
+export const claveRuta = (r: Ruta) => `${r.numero}|${r.provincia}`;
+export const mismaRuta = (a?: Ruta | null, b?: Ruta | null) => !!a && !!b && claveRuta(a) === claveRuta(b);
+
+const comillas = (texto: string) => texto.replaceAll("'", "''");
+export const filtroRuta = (numero: string) => `nro_ruta = '${comillas(numero)}' AND administra = 'Nacional'`;
 
 export interface LocalidadCercana {
   id: string;
@@ -29,7 +44,8 @@ export interface PuenteCercano {
   feature: Feature;
 }
 
-export interface AnalisisRn11 {
+export interface AnalisisRuta {
+  ruta: Ruta;
   km: number;
   tramos: number;
   localidades: LocalidadCercana[];
@@ -45,7 +61,7 @@ interface ColeccionGeoJSON {
 export async function pedir(url: string, cuerpo?: string): Promise<ColeccionGeoJSON> {
   const respuesta = await fetch(url, cuerpo ? { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body: cuerpo } : undefined);
   const texto = await respuesta.text();
-  if (!respuesta.ok || texto.startsWith('<')) throw new Error('GeoServer no pudo responder el análisis de la RN11.');
+  if (!respuesta.ok || texto.startsWith('<')) throw new Error('GeoServer no pudo responder el análisis de la ruta.');
   return JSON.parse(texto);
 }
 
@@ -63,14 +79,14 @@ export const gmlPoligonos = (poligonos: Poligono[]) => '<gml:MultiSurface srsNam
   + poligonos.map(p => `<gml:surfaceMember><gml:Polygon><gml:exterior><gml:LinearRing><gml:posList>${posiciones(p[0])}</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>`).join('')
   + '</gml:MultiSurface>';
 
-function consultaCerca(capa: string, propiedades: string[], lineas: Linea[], metros: number, chaco: Poligono[]) {
+function consultaCerca(capa: string, propiedades: string[], lineas: Linea[], metros: number, recorte: Poligono[]) {
   return `<wfs:GetFeature service="WFS" version="2.0.0" outputFormat="application/json"
     xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:fes="http://www.opengis.net/fes/2.0" xmlns:gml="http://www.opengis.net/gml/3.2">
     <wfs:Query typeNames="${WORKSPACE}:${capa}" srsName="EPSG:3857">
       ${['geom', ...propiedades].map(p => `<wfs:PropertyName>${p}</wfs:PropertyName>`).join('')}
       <fes:Filter><fes:And>
         <fes:DWithin><fes:ValueReference>geom</fes:ValueReference>${gmlLineas(lineas)}<fes:Distance uom="m">${metros}</fes:Distance></fes:DWithin>
-        <fes:Intersects><fes:ValueReference>geom</fes:ValueReference>${gmlPoligonos(chaco)}</fes:Intersects>
+        <fes:Intersects><fes:ValueReference>geom</fes:ValueReference>${gmlPoligonos(recorte)}</fes:Intersects>
       </fes:And></fes:Filter>
     </wfs:Query></wfs:GetFeature>`;
 }
@@ -80,40 +96,70 @@ const BASE = `${URL_WFS}?service=WFS&version=2.0.0&request=GetFeature&outputForm
 const provincias = new Map<string, Promise<Poligono[]>>();
 export function provincia(nombre: string): Promise<Poligono[]> {
   if (!provincias.has(nombre)) {
-    const filtro = encodeURIComponent(`provincia = '${nombre.replaceAll("'", "''")}'`);
-    provincias.set(nombre, pedir(`${BASE}&typeNames=${WORKSPACE}:provincias&CQL_FILTER=${filtro}`).then(r => {
+    const filtro = encodeURIComponent(`provincia = '${comillas(nombre)}'`);
+    const pedido = pedir(`${BASE}&typeNames=${WORKSPACE}:provincias&CQL_FILTER=${filtro}`).then(r => {
       if (!r.features.length) throw new Error(`No existe la provincia ${nombre}.`);
       return poligonosDe(r.features[0].geometry);
-    }));
+    });
+    pedido.catch(() => provincias.delete(nombre));
+    provincias.set(nombre, pedido);
   }
   return provincias.get(nombre)!;
 }
 
-// La traza de la RN11 en Chaco (tramos que tocan la provincia), pedida una sola vez.
-let traza: Promise<{ lineas: Linea[]; tramos: number; chaco: Poligono[] }> | undefined;
-export function trazaRn11() {
-  traza ??= (async () => {
-    const chaco = await provincia('Chaco');
-    const anillo = chaco.map(p => p[0]).reduce((a, b) => (b.length > a.length ? b : a));
-    const paso = Math.max(1, Math.floor(anillo.length / 120));
-    const simple = [...anillo.filter((_, i) => i % paso === 0), anillo[0]];
-    const wkt = `POLYGON((${simple.map(([x, y]) => `${y.toFixed(4)} ${x.toFixed(4)}`).join(',')}))`;
-    const tramos = (await pedir(`${BASE}&typeNames=${WORKSPACE}:red_vial&propertyName=geom&CQL_FILTER=${encodeURIComponent(`${FILTRO_RN11} AND INTERSECTS(geom, ${wkt})`)}`)).features;
-    return { lineas: tramos.flatMap(t => lineasDe(t.geometry)), tramos: tramos.length, chaco };
-  })();
-  traza.catch(() => { traza = undefined; });
-  return traza;
+// La provincia que contiene un punto del mapa (EPSG:3857). En CQL sobre EPSG:4326 va latitud longitud.
+export async function provinciaEn(coordenada: Coordinate): Promise<string | undefined> {
+  const [lon, lat] = toLonLat(coordenada);
+  const filtro = encodeURIComponent(`INTERSECTS(geom, POINT(${lat.toFixed(6)} ${lon.toFixed(6)}))`);
+  const datos = await pedir(`${BASE}&typeNames=${WORKSPACE}:provincias&propertyName=provincia&count=1&CQL_FILTER=${filtro}`);
+  const nombre = datos.features[0]?.properties.provincia;
+  return nombre ? String(nombre) : undefined;
 }
 
-export async function analizarRn11(): Promise<AnalisisRn11> {
-  const { lineas, tramos: cantidad, chaco } = await trazaRn11();
+// GeoServer no tiene la extensión querylayer: el recorte por provincia va como polígono WKT
+// simplificado (el anillo más grande, ~120 vértices). En CQL sobre EPSG:4326 el orden es latitud longitud.
+function wktSimplificado(poligonos: Poligono[]) {
+  const anillo = poligonos.map(p => p[0]).reduce((a, b) => (b.length > a.length ? b : a));
+  const paso = Math.max(1, Math.floor(anillo.length / 120));
+  const puntos = [...anillo.filter((_, i) => i % paso === 0), anillo[0]];
+  return `POLYGON((${puntos.map(([x, y]) => `${y.toFixed(4)} ${x.toFixed(4)}`).join(',')}))`;
+}
 
-  const km = recortar(lineas, chaco).reduce((total, l) => total + longitud(l), 0) / 1000;
+export interface Traza {
+  lineas: Linea[];
+  tramos: number;
+  recorte: Poligono[];
+}
+
+// La traza de una ruta nacional en una provincia (tramos que tocan la provincia), pedida una sola vez.
+const trazas = new Map<string, Promise<Traza>>();
+export function trazaRuta(ruta: Ruta): Promise<Traza> {
+  const clave = claveRuta(ruta);
+  if (!trazas.has(clave)) {
+    const pedido = (async () => {
+      const recorte = await provincia(ruta.provincia);
+      const filtro = `${filtroRuta(ruta.numero)} AND INTERSECTS(geom, ${wktSimplificado(recorte)})`;
+      const tramos = (await pedir(`${BASE}&typeNames=${WORKSPACE}:red_vial&propertyName=geom&CQL_FILTER=${encodeURIComponent(filtro)}`)).features;
+      if (!tramos.length) throw new Error(`La RN${ruta.numero} no pasa por ${ruta.provincia}.`);
+      return { lineas: tramos.flatMap(t => lineasDe(t.geometry)), tramos: tramos.length, recorte };
+    })();
+    pedido.catch(() => trazas.delete(clave));
+    trazas.set(clave, pedido);
+  }
+  return trazas.get(clave)!;
+}
+
+export const trazaRn11 = () => trazaRuta(RN11);
+
+export async function analizarRuta(ruta: Ruta): Promise<AnalisisRuta> {
+  const { lineas, tramos: cantidad, recorte } = await trazaRuta(ruta);
+
+  const km = recortar(lineas, recorte).reduce((total, l) => total + longitud(l), 0) / 1000;
 
   const formato = new GeoJSON();
   const [locales, puentes] = await Promise.all([
-    pedir(URL_WFS, consultaCerca('localidades', ['nombre', 'departamen', 'canthab'], lineas, 25_000, chaco)),
-    pedir(URL_WFS, consultaCerca('puente_red_vial_puntos', ['nombre', 'tipo'], lineas, 400, chaco)),
+    pedir(URL_WFS, consultaCerca('localidades', ['nombre', 'departamen', 'canthab'], lineas, 25_000, recorte)),
+    pedir(URL_WFS, consultaCerca('puente_red_vial_puntos', ['nombre', 'tipo'], lineas, 400, recorte)),
   ]);
 
   const lonLat = (f: Feature) => toLonLat((f.getGeometry() as Point).getCoordinates()) as LonLat;
@@ -150,5 +196,5 @@ export async function analizarRn11(): Promise<AnalisisRn11> {
     const lista = localidades.filter(l => l.franja === franja);
     return { localidades: lista.length, habitantes: lista.reduce((s, l) => s + l.habitantes, 0), sinDato: lista.filter(l => !l.habitantes).length };
   };
-  return { km, tramos: cantidad, localidades, puentes: puentesCerca, franja1: resumir(1), franja2: resumir(2) };
+  return { ruta, km, tramos: cantidad, localidades, puentes: puentesCerca, franja1: resumir(1), franja2: resumir(2) };
 }

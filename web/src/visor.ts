@@ -7,17 +7,18 @@ import TileWMS from 'ol/source/TileWMS';
 import TileState from 'ol/TileState';
 import type ImageTile from 'ol/ImageTile';
 import VectorSource from 'ol/source/Vector';
-import GeoJSON from 'ol/format/GeoJSON';
-import { getLength } from 'ol/sphere';
-import { getPointResolution, toLonLat } from 'ol/proj';
+import { getPointResolution, toLonLat, fromLonLat } from 'ol/proj';
 import { getCenter } from 'ol/extent';
+import Feature from 'ol/Feature';
+import { MultiLineString } from 'ol/geom';
 import type { Coordinate } from 'ol/coordinate';
 import { Circle, Fill, Stroke, Style, Text } from 'ol/style';
 import { getVectorContext } from 'ol/render';
 import type RenderEvent from 'ol/render/Event';
 import { sldDeCapas, sldDeLeyenda } from './estilos';
 import { escalaActual, movimientoReducido } from './preferencias';
-import { CAPAS, EXTENSION_CHACO, FILTRO_RN11, URL_WFS, URL_WMS, WORKSPACE } from './config';
+import { CAPAS, EXTENSION_CHACO, URL_WMS, WORKSPACE } from './config';
+import { claveRuta, type Ruta, type Traza } from './analisisRuta';
 
 // Todo lo que las herramientas y los paneles necesitan del mapa.
 export interface Visor {
@@ -35,8 +36,9 @@ export interface Visor {
   foco: VectorSource;
   // Lo que dibuja el usuario: medición o el punto de una obra nueva.
   dibujo: VectorSource;
-  rn11: VectorLayer<VectorSource>;
-  // Tablero de la RN11: bandas de 10 y 20 km, localidades por franja y puentes.
+  // La ruta nacional elegida (la RN11 u otra con doble clic), dibujada como ruta señalizada.
+  ruta: VectorLayer<VectorSource>;
+  // Tablero de la ruta: bandas de 10 y 20 km, localidades por franja y puentes.
   analisis: VectorSource;
   cuadricula: Graticule;
 }
@@ -91,10 +93,10 @@ const estiloFoco = () => [
   }),
 ];
 
-// La RN11 se dibuja como una ruta señalizada: halo del color del papel y trazo vial encima. El zIndex
+// La ruta elegida se dibuja como una ruta señalizada: halo del color del papel y trazo vial encima. El zIndex
 // ordena por pasada entre todos los tramos (primero todos los halos, al final todos los trazos), así el
 // borde de un tramo no tapa la unión con el siguiente.
-const estiloRn11 = () => [
+const estiloRuta = () => [
   new Style({ zIndex: 1, stroke: new Stroke({ color: hacerTransparente(paleta.acento, 0.18), width: 18, lineCap: 'round', lineJoin: 'round' }) }),
   new Style({ zIndex: 2, stroke: new Stroke({ color: paleta.papel, width: 8, lineCap: 'round', lineJoin: 'round' }) }),
   new Style({ zIndex: 3, stroke: new Stroke({ color: paleta.acento, width: 4, lineCap: 'round', lineJoin: 'round' }) }),
@@ -102,16 +104,17 @@ const estiloRn11 = () => [
 
 // Bandas de 10 y 20 km alrededor de la traza: la misma línea con un ancho en metros reales, que con
 // extremos y uniones redondeados es exactamente el área de influencia. En EPSG:3857 un metro de
-// terreno mide 1/cos(latitud) metros proyectados; la RN11 en Chaco anda por los 27° S.
-const COS_LATITUD_RN11 = Math.cos((27 * Math.PI) / 180);
-const ancho = (metros: number, resolucion: number) => (2 * metros) / COS_LATITUD_RN11 / resolucion;
+// terreno mide 1/cos(latitud) metros proyectados: la traza guarda el coseno de su latitud media
+// (la RN11 en Chaco anda por los 27° S; la RN3 en Santa Cruz, por los 49° S).
+const ancho = (metros: number, resolucion: number, cosLatitud: number) => (2 * metros) / cosLatitud / resolucion;
 
 function estiloAnalisis(feature: import('ol/Feature').FeatureLike, resolucion: number) {
   const tipo = feature.get('tipo_analisis');
   if (tipo === 'traza') {
+    const cos = feature.get('cos_latitud') ?? Math.cos((27 * Math.PI) / 180);
     return [
-      new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato2, 0.16), width: ancho(20_000, resolucion), lineCap: 'round', lineJoin: 'round' }) }),
-      new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato1, 0.16), width: ancho(10_000, resolucion), lineCap: 'round', lineJoin: 'round' }) }),
+      new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato2, 0.16), width: ancho(20_000, resolucion, cos), lineCap: 'round', lineJoin: 'round' }) }),
+      new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato1, 0.16), width: ancho(10_000, resolucion, cos), lineCap: 'round', lineJoin: 'round' }) }),
     ];
   }
   if (tipo === 'localidad') {
@@ -224,7 +227,7 @@ export function crearVisor(destino: HTMLElement): Visor {
   const resaltado = new VectorSource();
   const foco = new VectorSource();
   const dibujo = new VectorSource();
-  const rn11 = new VectorLayer({ source: new VectorSource(), style: estiloRn11, zIndex: 35, visible: false });
+  const ruta = new VectorLayer({ source: new VectorSource(), style: estiloRuta, zIndex: 35, visible: false });
   const cuadricula = crearCuadricula();
   const capaFoco = new VectorLayer({ source: foco, style: estiloFoco, zIndex: 55 });
   const analisis = new VectorSource();
@@ -236,7 +239,7 @@ export function crearVisor(destino: HTMLElement): Visor {
       cuadricula,
       wms,
       capaAnalisis,
-      rn11,
+      ruta,
       new VectorLayer({ source: resaltado, style: estiloResaltado, zIndex: 50 }),
       capaFoco,
       new VectorLayer({ source: dibujo, style: estiloDibujo, zIndex: 60 }),
@@ -257,7 +260,7 @@ export function crearVisor(destino: HTMLElement): Visor {
     mapa.render();
   });
 
-  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, rn11, analisis, cuadricula };
+  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula };
   actualizarWms(visor);
   return visor;
 }
@@ -395,6 +398,16 @@ export function denominadorEscala(mapa: Map): number {
   return Math.round(resolucion / 0.00028);
 }
 
+// Acerca la vista hasta que el denominador de escala baje a `denominador`, sin mover el centro.
+export function acercarAEscala(visor: Visor, denominador: number) {
+  const vista = visor.mapa.getView();
+  const resolucion = vista.getResolution()!;
+  // Relación entre la resolución real (en el suelo) y la del mapa a esta latitud.
+  const factor = getPointResolution('EPSG:3857', resolucion, vista.getCenter()!) / resolucion;
+  vista.cancelAnimations();
+  vista.animate({ resolution: (denominador * 0.00028) / factor, duration: movimientoReducido() ? 0 : 700 });
+}
+
 export function formatoCoordenada(coordenada: Coordinate) {
   const [lon, lat] = toLonLat(coordenada);
   const gms = (valor: number, pos: string, neg: string) => {
@@ -408,12 +421,12 @@ export function formatoCoordenada(coordenada: Coordinate) {
 }
 
 
-export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: number; duracion?: number } = {}) {
+export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: number; duracion?: number; conPanel?: boolean } = {}) {
   const vista = visor.mapa.getView();
   vista.cancelAnimations();
   vista.fit(extension, {
     size: visor.mapa.getSize(),
-    padding: margenesMapa(),
+    padding: margenesMapa(opciones.conPanel),
     maxZoom: opciones.maxZoom ?? 14,
     duration: movimientoReducido() ? 0 : opciones.duracion ?? 900,
   });
@@ -421,39 +434,33 @@ export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: 
 
 export const verChaco = (visor: Visor, duracion?: number) => volarA(visor, EXTENSION_CHACO, { duracion });
 
-// Los paneles tapan los bordes del mapa: el encuadre deja ese espacio libre.
-function margenesMapa(): [number, number, number, number] {
+// Los paneles tapan los bordes del mapa: el encuadre deja ese espacio libre. Con `conPanel` también
+// el del panel de la derecha (tablero o resultados), que en pantallas chicas va abajo.
+function margenesMapa(conPanel = false): [number, number, number, number] {
+  if (window.innerWidth < 1024 && conPanel) return [150, 20, Math.round(window.innerHeight * 0.5), 20];
   if (window.innerWidth < 768) return [150, 20, 190, 20];
   const escala = escalaActual();
-  return [110, 120, 130, 400].map(m => Math.round(m * escala)) as [number, number, number, number];
+  return [110, conPanel ? 440 : 120, 130, 400].map(m => Math.round(m * escala)) as [number, number, number, number];
 }
 
-// Polígono de Chaco simplificado en WKT. GeoServer no tiene la extensión querylayer, así que el
-// recorte de la RN11 va como geometría literal. En CQL sobre EPSG:4326 el orden es latitud longitud.
-async function wktChaco(): Promise<string> {
-  const url = `${URL_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=${WORKSPACE}:provincias`
-    + `&outputFormat=application/json&srsName=CRS:84&CQL_FILTER=${encodeURIComponent("provincia = 'Chaco'")}`;
-  const datos = await (await fetch(url)).json();
-  const geometria = datos.features[0].geometry;
-  const poligonos: number[][][][] = geometria.type === 'MultiPolygon' ? geometria.coordinates : [geometria.coordinates];
-  const anillo = poligonos.map(p => p[0]).reduce((a, b) => (b.length > a.length ? b : a));
-  const paso = Math.max(1, Math.floor(anillo.length / 120));
-  const puntos = [...anillo.filter((_, i) => i % paso === 0), anillo[0]];
-  return `POLYGON((${puntos.map(([x, y]) => `${y.toFixed(4)} ${x.toFixed(4)}`).join(',')}))`;
-}
-
-// Trae la traza de la RN11 en Chaco (68 tramos, los mismos de la consulta SQL de la parte B).
-export async function cargarRn11(visor: Visor): Promise<{ tramos: number; km: number }> {
-  const fuente = visor.rn11.getSource()!;
-  if (!fuente.getFeatures().length) {
-    const filtro = `${FILTRO_RN11} AND INTERSECTS(geom, ${await wktChaco()})`;
-    const url = `${URL_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=${WORKSPACE}:red_vial`
-      + `&outputFormat=application/json&srsName=EPSG:3857&propertyName=geom,nombre,tipo&CQL_FILTER=${encodeURIComponent(filtro)}`;
-    const datos = await (await fetch(url)).json();
-    fuente.addFeatures(new GeoJSON().readFeatures(datos, { dataProjection: 'EPSG:3857' }));
+// Deja la traza de una ruta nacional en una provincia (para la RN11 en Chaco, 68 tramos: los mismos
+// de la consulta SQL de la parte B) en la capa de la ruta como una sola geometría, con el coseno de su
+// latitud media para las bandas en metros. Es sincrónica: quien la pidió ya sabe que sigue vigente.
+export function dibujarRuta(visor: Visor, elegida: Ruta, traza: Traza) {
+  const fuente = visor.ruta.getSource()!;
+  if (fuente.get('clave') !== claveRuta(elegida)) {
+    fuente.clear();
+    const geometria = new MultiLineString(traza.lineas.map(l => l.map(p => fromLonLat(p))));
+    const latitud = toLonLat(getCenter(geometria.getExtent()))[1];
+    fuente.addFeature(new Feature({ geometry: geometria, cos_latitud: Math.cos((latitud * Math.PI) / 180) }));
+    fuente.set('clave', claveRuta(elegida));
   }
-  const km = fuente.getFeatures().reduce((total, f) => total + getLength(f.getGeometry()!), 0) / 1000;
-  return { tramos: fuente.getFeatures().length, km };
+  visor.ruta.setVisible(true);
+}
+
+export function ocultarRuta(visor: Visor) {
+  visor.ruta.setVisible(false);
+  visor.analisis.clear();
 }
 
 // El canvas no garantiza entender color-mix(): las variables del tema van en hex y se pasan a rgba.

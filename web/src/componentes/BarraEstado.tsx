@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ScaleLine } from 'ol/control';
 import { unByKey } from 'ol/Observable';
+import { bandaDeEscala } from '../estilos';
 import { denominadorEscala, formatoCoordenada, type Visor } from '../visor';
 
 // Escala gráfica (ScaleLine de OpenLayers), denominador 1:N y coordenadas bajo el cursor.
@@ -37,7 +38,7 @@ export default function BarraEstado({ visor }: { visor: Visor }) {
       <div className="flex items-end justify-between gap-4">
         <div className="escala min-w-[80px]" ref={contenedorEscala} />
         <div className="text-right">
-          <div className="text-[12px] font-medium text-[var(--tinta-3)]">Escala</div>
+          <div className="text-[12px] font-medium text-[var(--tinta-3)]">Escala · {bandaDeEscala(escala)}</div>
           <div className="text-[15px] font-semibold">1:{escala.toLocaleString('es-AR')}</div>
         </div>
       </div>

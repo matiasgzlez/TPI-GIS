@@ -2,22 +2,24 @@ import { useState } from 'react';
 import { Spinner } from '@heroui/react';
 import { Bridge, CaretDown, X } from '@phosphor-icons/react';
 import { buffer } from 'ol/extent';
-import type { AnalisisRn11, LocalidadCercana } from '../analisisRn11';
+import type { AnalisisRuta, LocalidadCercana, Ruta } from '../analisisRuta';
 import { volarA, type Visor } from '../visor';
 import EscudoRuta from './EscudoRuta';
 import { Dona, NumeroAnimado } from './ui/graficos';
 
 interface Props {
   visor: Visor;
-  analisis?: AnalisisRn11;
+  ruta: Ruta;
+  analisis?: AnalisisRuta;
   error?: string;
   onCerrar: () => void;
 }
 
 const km = (metros: number) => (metros / 1000).toLocaleString('es-AR', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
-// Las respuestas de la parte B, calculadas en vivo y explicadas para entenderlas de un vistazo.
-export default function TableroRn11({ visor, analisis, error, onCerrar }: Props) {
+// Las respuestas de la parte B para la ruta elegida, calculadas en vivo y explicadas para entenderlas
+// de un vistazo. La RN11 en Chaco es la del trabajo; cualquier otra ruta nacional sale igual.
+export default function TableroRuta({ visor, ruta, analisis, error, onCerrar }: Props) {
   const [verPuentes, setVerPuentes] = useState(false);
   const enfocar = (f?: import('ol/Feature').default) => {
     visor.foco.clear();
@@ -27,9 +29,9 @@ export default function TableroRn11({ visor, analisis, error, onCerrar }: Props)
   return (
     <section className="entra panel flex max-h-full min-h-0 flex-col overflow-hidden" aria-live="polite">
       <header className="flex items-start gap-3 border-b border-[var(--linea)] py-4 pl-5 pr-3">
-        <EscudoRuta className="mt-0.5 h-9 w-auto shrink-0" />
+        <EscudoRuta numero={ruta.numero} className="mt-0.5 h-9 w-auto shrink-0" />
         <div className="min-w-0 flex-1">
-          <h2 className="text-[19px] font-semibold leading-tight tracking-[-0.02em]">Ruta Nacional 11 en Chaco</h2>
+          <h2 className="text-[19px] font-semibold leading-tight tracking-[-0.02em]">Ruta Nacional {ruta.numero} en {ruta.provincia}</h2>
           <p className="mt-0.5 text-[14px] text-[var(--tinta-3)]">Calculado en vivo sobre las capas del IGN</p>
         </div>
         <button type="button" onClick={onCerrar} aria-label="Cerrar tablero" className="grid size-10 shrink-0 place-items-center rounded-xl text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]">
@@ -111,7 +113,7 @@ export default function TableroRn11({ visor, analisis, error, onCerrar }: Props)
   );
 }
 
-function Franja({ color, titulo, datos }: { color: string; titulo: string; datos: AnalisisRn11['franja1'] }) {
+function Franja({ color, titulo, datos }: { color: string; titulo: string; datos: AnalisisRuta['franja1'] }) {
   return (
     <div className="rounded-xl bg-[var(--superficie-2)] px-3.5 py-3">
       <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--tinta-3)]">

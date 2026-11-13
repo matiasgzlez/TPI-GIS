@@ -2,7 +2,7 @@ import GeoJSON from 'ol/format/GeoJSON';
 import { toLonLat } from 'ol/proj';
 import { getCenter } from 'ol/extent';
 import { URL_WFS, WORKSPACE } from './config';
-import { gmlLineas, gmlPoligonos, pedir, provincia, trazaRn11 } from './analisisRn11';
+import { gmlLineas, gmlPoligonos, pedir, provincia, trazaRn11 } from './analisisRuta';
 import { distanciaALineas, type Linea, type LonLat, type Poligono } from './geodesia';
 import { armarResultado, mostrar, type Consulta } from './herramientas';
 import { describir, geometriaDeCapa, type Interpretacion, type Lugar } from './lenguaje';
@@ -14,8 +14,8 @@ const MAXIMO = 1000;
 async function geometriaDe(lugar: Lugar): Promise<{ lineas?: Linea[]; poligonos?: Poligono[]; punto?: LonLat; recorte?: Poligono[]; nombre: string }> {
   // La RN11 se analiza en Chaco, como en la parte B: los resultados se recortan a la provincia.
   if (lugar.tipo === 'rn11') {
-    const { lineas, chaco } = await trazaRn11();
-    return { lineas, recorte: chaco, nombre: 'la RN11' };
+    const { lineas, recorte } = await trazaRn11();
+    return { lineas, recorte, nombre: 'la RN11' };
   }
   if (lugar.tipo === 'provincia') return { poligonos: await provincia(lugar.nombre), nombre: lugar.nombre };
   const filtro = encodeURIComponent(`nombre ILIKE '${lugar.nombre.replaceAll("'", "''")}'`);

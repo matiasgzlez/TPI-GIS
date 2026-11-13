@@ -2,10 +2,12 @@ import { useEffect, useReducer, useState } from 'react';
 import { Switch } from '@heroui/react';
 import { ArrowCounterClockwise, CaretDown, Eye, EyeSlash, MagnifyingGlass, SlidersHorizontal, X } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'motion/react';
+import { unByKey } from 'ol/Observable';
 import { CAPAS, CONJUNTOS, GRUPOS, type Geometria } from '../config';
 import { normalizar, SINONIMOS } from '../comandos';
 import { RESORTE_PANEL } from '../movimiento';
-import { cambiarCapas, cambiarOpacidad, cargarLeyenda, ponerCapas, restablecerCapas, suscribirCapas, verSolo, type Visor } from '../visor';
+import { escalaMinima } from '../estilos';
+import { acercarAEscala, cambiarCapas, cambiarOpacidad, cargarLeyenda, denominadorEscala, ponerCapas, restablecerCapas, suscribirCapas, verSolo, type Visor } from '../visor';
 
 interface Props {
   visor: Visor;
@@ -23,6 +25,26 @@ export default function PanelCapas({ visor, plegable }: Props) {
 
   // La visibilidad vive en el visor; el panel solo la refleja.
   useEffect(() => suscribirCapas(visor, redibujar), [visor]);
+
+  // Capas prendidas que a la escala actual no dibujan nada. Se guarda como texto para que el panel
+  // solo se redibuje cuando cambia el conjunto, no en cada cuadro del zoom.
+  const [sinDibujar, setSinDibujar] = useState('');
+  useEffect(() => {
+    const vista = visor.mapa.getView();
+    const actualizar = () => {
+      if (vista.getResolution() === undefined || !vista.getCenter()) return;
+      const escala = denominadorEscala(visor.mapa);
+      setSinDibujar([...visor.visibles].filter(n => (escalaMinima(n) ?? Infinity) <= escala).join(','));
+    };
+    actualizar();
+    const clave = vista.on('change:resolution', actualizar);
+    const desuscribir = suscribirCapas(visor, actualizar);
+    return () => {
+      unByKey(clave);
+      desuscribir();
+    };
+  }, [visor]);
+  const ocultas = new Set(sinDibujar ? sinDibujar.split(',') : []);
 
   const alternar = (id: string) => setAbiertos(prev => {
     const nuevo = new Set(prev);
@@ -141,6 +163,18 @@ export default function PanelCapas({ visor, plegable }: Props) {
                               <Switch.Control><Switch.Thumb /></Switch.Control>
                             </Switch.Content>
                           </Switch>
+                          {visible && ocultas.has(capa.nombre) && (
+                            <p className="-mt-1 mb-1.5 pl-[58px] pr-4 text-[13px] text-[var(--tinta-3)]">
+                              Aparece al acercarse.{' '}
+                              <button
+                                type="button"
+                                onClick={() => acercarAEscala(visor, Math.round(escalaMinima(capa.nombre)! * 0.9))}
+                                className="font-medium text-[var(--tinta-2)] underline underline-offset-2 hover:text-[var(--tinta)]"
+                              >
+                                Acercar
+                              </button>
+                            </p>
+                          )}
                           {visible && (
                             <div className="flex items-start gap-2 pr-3">
                               <Leyenda nombre={capa.nombre} titulo={capa.titulo} />

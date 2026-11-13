@@ -1,4 +1,4 @@
-// Escudo de ruta nacional argentina: el sello de la RN11 en todo el visor.
+// Escudo de ruta nacional argentina: el sello de la RN11 (o de la ruta elegida) en todo el visor.
 export default function EscudoRuta({ numero = '11', className = '' }: { numero?: string; className?: string }) {
   return (
     <svg viewBox="0 0 32 36" className={className} aria-hidden="true">
@@ -12,7 +12,7 @@ export default function EscudoRuta({ numero = '11', className = '' }: { numero?:
       <path d="M4.5 5.5h23v5h-23z" fill="var(--escudo-tinta, #15181c)" />
       <text
         x="16" y="26.2" textAnchor="middle" fill="var(--escudo-tinta, #15181c)"
-        style={{ font: '700 12.5px "Schibsted Grotesk Variable", sans-serif', letterSpacing: '-0.04em' }}
+        style={{ font: `700 ${numero.length > 2 ? 9.5 : 12.5}px "Schibsted Grotesk Variable", sans-serif`, letterSpacing: '-0.04em' }}
       >
         {numero}
       </text>

@@ -4,8 +4,8 @@ import { CornersOut, GearSix, Minus, Moon, Plus, Sun } from '@phosphor-icons/rea
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
-import { LineString, MultiLineString } from 'ol/geom';
 import { buffer, getCenter } from 'ol/extent';
+import { unByKey } from 'ol/Observable';
 import BarraEstado from './componentes/BarraEstado';
 import Buscador from './componentes/Buscador';
 import Dock from './componentes/Dock';
@@ -15,8 +15,8 @@ import PanelCapas from './componentes/PanelCapas';
 import type { EstadoResultados } from './componentes/PanelResultados';
 import type { Sugerencia } from './comandos';
 import { activarHerramienta, consultarCapaEnExtension, HERRAMIENTAS, type Modo } from './herramientas';
-import { activarCartel } from './cartel';
-import { analizarRn11, type AnalisisRn11 } from './analisisRn11';
+import { activarCartel, type RutaBajoCursor } from './cartel';
+import { analizarRuta, mismaRuta, provinciaEn, RN11, trazaRuta, type AnalisisRuta, type Ruta } from './analisisRuta';
 import { aprender } from './aprendizaje';
 import { usePrediccion } from './prediccion';
 import { claveDe, type Interpretacion } from './lenguaje';
@@ -24,18 +24,19 @@ import { guardarObra, type DatosObra } from './obras';
 import { useTema } from './tema';
 import { usePreferencias } from './preferencias';
 import { RESORTE_PANEL } from './movimiento';
-import { aplicarTema, cambiarCapas, cargarRn11, crearVisor, refrescarMapa, restablecerCapas, verChaco, volarA, type Visor } from './visor';
+import { aplicarTema, cambiarCapas, crearVisor, dibujarRuta, ocultarRuta, refrescarMapa, restablecerCapas, verChaco, volarA, type Visor } from './visor';
 
 // Se cargan recién cuando hacen falta: el formulario trae Select, TextArea y el botón animado.
 const FormObra = lazy(() => import('./componentes/FormObra'));
 const PanelResultados = lazy(() => import('./componentes/PanelResultados'));
 const PanelConfiguracion = lazy(() => import('./componentes/PanelConfiguracion'));
-const TableroRn11 = lazy(() => import('./componentes/TableroRn11'));
+const TableroRuta = lazy(() => import('./componentes/TableroRuta'));
 
 const retraso = (ms: number) => ({ '--retraso': `${ms}ms` }) as React.CSSProperties;
 const esCelular = () => !window.matchMedia('(min-width: 1024px)').matches;
 
-interface EstadoRn11 { cargando: boolean; activa: boolean; tramos?: number }
+// La ruta nacional del tablero: la RN11 en Chaco desde el botón, o cualquier otra con doble clic.
+interface EstadoRuta { cargando: boolean; activa: Ruta | null; tramos?: number }
 
 export default function App() {
   const destino = useRef<HTMLDivElement>(null);
@@ -44,12 +45,14 @@ export default function App() {
   const [resultados, setResultados] = useState<EstadoResultados | null>(null);
   const [obra, setObra] = useState<Point | null>(null);
   const [guardando, setGuardando] = useState(false);
-  const [rn11, setRn11] = useState<EstadoRn11>({ cargando: false, activa: false });
+  const [ruta, setRuta] = useState<EstadoRuta>({ cargando: false, activa: null });
+  // Cada pedido de ruta tiene un número: si llega uno nuevo (otro doble clic), el anterior se descarta.
+  const pedidoRuta = useRef(0);
   const { oscuro, cambiar: cambiarTema } = useTema();
   const { preferencias, cambiar: cambiarPreferencia } = usePreferencias();
   const [configuracion, setConfiguracion] = useState(false);
   const enVista = usePrediccion(visor);
-  const [tablero, setTablero] = useState<{ analisis?: AnalisisRn11; error?: string } | null>(null);
+  const [tablero, setTablero] = useState<{ ruta: Ruta; analisis?: AnalisisRuta; error?: string } | null>(null);
 
   // El mapa de OpenLayers se crea una sola vez; React maneja los paneles de alrededor.
   useEffect(() => {
@@ -88,11 +91,27 @@ export default function App() {
   }, [visor, oscuro, preferencias.cuadricula]);
 
   // Cartel con el nombre de lo que hay bajo el cursor, solo mientras se navega o se consulta por punto.
+  // Si es una ruta nacional, el doble clic la elige y abre su tablero (en vez de acercar el mapa).
   const modoActual = useRef(modo);
   modoActual.current = modo;
+  const elegirRutaEn = useRef<(numero: string, coordenada: number[]) => void>(() => {});
   useEffect(() => {
     if (!visor) return;
-    return activarCartel(visor, () => modoActual.current === 'navegar' || modoActual.current === 'punto');
+    let bajoCursor: RutaBajoCursor | null = null;
+    const quitarCartel = activarCartel(visor, {
+      habilitado: () => modoActual.current === 'navegar' || modoActual.current === 'punto',
+      alCambiarRuta: r => { bajoCursor = r; },
+    });
+    const clave = visor.mapa.on('dblclick', e => {
+      if (!bajoCursor || Math.hypot(e.pixel[0] - bajoCursor.pixel[0], e.pixel[1] - bajoCursor.pixel[1]) > 12) return;
+      e.preventDefault();
+      e.stopPropagation();
+      elegirRutaEn.current(bajoCursor.numero, bajoCursor.coordenada);
+    });
+    return () => {
+      quitarCartel();
+      unByKey(clave);
+    };
   }, [visor]);
 
   useEffect(() => {
@@ -156,54 +175,72 @@ export default function App() {
     }
   }
 
-  async function mostrarRn11(alternar: boolean) {
-    if (!visor || rn11.cargando) return;
-    if (rn11.activa && alternar) {
-      visor.rn11.setVisible(false);
-      visor.analisis.clear();
-      setRn11({ ...rn11, activa: false });
-      setTablero(null);
+  function cerrarRuta() {
+    pedidoRuta.current++;
+    if (visor) ocultarRuta(visor);
+    setRuta({ cargando: false, activa: null });
+    setTablero(null);
+  }
+
+  // Muestra una ruta nacional en una provincia: la traza señalizada, el vuelo hasta ella y el tablero
+  // con las respuestas de la parte B. Con `alternar`, si ya hay una ruta a la vista, la oculta.
+  async function mostrarRuta(elegida: Ruta, alternar = false) {
+    if (!visor) return;
+    if (alternar && ruta.activa) return cerrarRuta();
+    if (mismaRuta(ruta.activa, elegida) && tablero) return;
+    const pedido = ++pedidoRuta.current;
+    const vigente = () => pedido === pedidoRuta.current;
+    setRuta(r => ({ ...r, cargando: true }));
+    setResultados(null);
+    setTablero({ ruta: elegida });
+    visor.analisis.clear();
+    try {
+      const traza = await trazaRuta(elegida);
+      if (!vigente()) return;
+      dibujarRuta(visor, elegida, traza);
+      volarA(visor, visor.ruta.getSource()!.getExtent()!, { duracion: 1400, conPanel: true });
+      setRuta({ cargando: false, activa: elegida, tramos: traza.tramos });
+    } catch (error) {
+      if (!vigente()) return;
+      cerrarRuta();
+      toast.danger(`No se pudo cargar la traza de la RN${elegida.numero}`, { description: (error as Error).message || '¿Está levantado GeoServer?' });
       return;
     }
-    setRn11({ ...rn11, cargando: true });
-    setResultados(null);
-    setTablero({});
     try {
-      const { tramos } = await cargarRn11(visor);
-      visor.rn11.setVisible(true);
-      volarA(visor, visor.rn11.getSource()!.getExtent()!, { duracion: 1400 });
-      setRn11({ cargando: false, activa: true, tramos });
-      mostrarAnalisis();
-    } catch {
-      setTablero(null);
-      setRn11({ cargando: false, activa: false });
-      toast.danger('No se pudo cargar la traza de la RN11', { description: '¿Está levantado GeoServer?' });
+      const analisis = await analizarRuta(elegida);
+      if (!vigente()) return;
+      dibujarAnalisis(analisis);
+      setTablero({ ruta: elegida, analisis });
+    } catch (error) {
+      if (vigente()) setTablero({ ruta: elegida, error: (error as Error).message });
     }
   }
 
-  // Las respuestas de la parte B en el mapa (bandas, localidades por franja, puentes) y en el tablero.
-  async function mostrarAnalisis() {
-    if (!visor) return;
+  // Doble clic sobre una ruta nacional: se analiza dentro de la provincia donde se hizo el clic.
+  elegirRutaEn.current = async (numero, coordenada) => {
     try {
-      const analisis = await analizarRn11();
-      visor.analisis.clear();
-      // Toda la traza en una sola geometría: cada banda se pinta de una vez y la transparencia no se
-      // acumula donde los tramos se tocan.
-      const lineas = visor.rn11.getSource()!.getFeatures().flatMap(f => {
-        const g = f.getGeometry() as MultiLineString | LineString;
-        return g.getType() === 'MultiLineString' ? (g as MultiLineString).getCoordinates() : [(g as LineString).getCoordinates()];
-      });
-      visor.analisis.addFeature(new Feature({ geometry: new MultiLineString(lineas), tipo_analisis: 'traza' }));
-      analisis.localidades.forEach(l => {
-        l.feature.set('tipo_analisis', 'localidad');
-        l.feature.set('habitantes', l.habitantes);
-      });
-      analisis.puentes.forEach(p => p.feature.set('tipo_analisis', 'puente'));
-      visor.analisis.addFeatures([...analisis.localidades.map(l => l.feature), ...analisis.puentes.map(p => p.feature)]);
-      setTablero({ analisis });
+      const provincia = await provinciaEn(coordenada);
+      if (!provincia) throw new Error('El punto está fuera de las provincias argentinas.');
+      mostrarRuta({ numero, provincia });
     } catch (error) {
-      setTablero({ error: (error as Error).message });
+      toast.danger(`No se pudo elegir la RN${numero}`, { description: (error as Error).message });
     }
+  };
+
+  // Las respuestas de la parte B en el mapa: bandas de 10 y 20 km, localidades por franja y puentes.
+  // Las bandas usan la misma geometría que la traza: cada una se pinta de una vez y la transparencia
+  // no se acumula donde los tramos se tocan.
+  function dibujarAnalisis(analisis: AnalisisRuta) {
+    if (!visor) return;
+    visor.analisis.clear();
+    const traza = visor.ruta.getSource()!.getFeatures()[0];
+    if (traza) visor.analisis.addFeature(new Feature({ geometry: traza.getGeometry(), tipo_analisis: 'traza', cos_latitud: traza.get('cos_latitud') }));
+    analisis.localidades.forEach(l => {
+      l.feature.set('tipo_analisis', 'localidad');
+      l.feature.set('habitantes', l.habitantes);
+    });
+    analisis.puentes.forEach(p => p.feature.set('tipo_analisis', 'puente'));
+    visor.analisis.addFeatures([...analisis.localidades.map(l => l.feature), ...analisis.puentes.map(p => p.feature)]);
   }
 
   // Una pregunta en lenguaje natural: la consulta se resuelve en GeoServer, se resalta en el mapa y
@@ -212,7 +249,7 @@ export default function App() {
     if (!visor) return;
     aprender('consulta', claveDe(i), JSON.stringify(i));
     if (i.intencion === 'tablero') {
-      mostrarRn11(false);
+      mostrarRuta(RN11);
       return;
     }
     if (!visor.visibles.has(i.capa)) cambiarCapas(visor, [i.capa], true);
@@ -258,7 +295,7 @@ export default function App() {
       cambiarCapas(visor, [valor], prender);
       toast(`${s.titulo}: ${prender ? 'prendida' : 'apagada'}`, { timeout: 2500 });
     } else if (valor === 'rn11') {
-      mostrarRn11(false);
+      mostrarRuta(RN11);
     } else if (valor === 'chaco') {
       verChaco(visor);
     } else if (valor === 'apagar') {
@@ -291,7 +328,7 @@ export default function App() {
               <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
             </div>
             <div className="entra pointer-events-auto ml-auto flex items-center gap-2.5 max-lg:hidden" style={retraso(260)}>
-              <BotonRn11 estado={rn11} onPress={() => mostrarRn11(true)} />
+              <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} />
               <BotonRedondo etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={() => cambiarTema(!oscuro)}>
                 {oscuro ? <Sun size={21} weight="bold" /> : <Moon size={21} weight="bold" />}
               </BotonRedondo>
@@ -324,7 +361,7 @@ export default function App() {
               >
                 <div className="pointer-events-auto flex min-h-0 flex-col">
                   <Suspense fallback={null}>
-                    <TableroRn11 visor={visor} analisis={tablero.analisis} error={tablero.error} onCerrar={() => setTablero(null)} />
+                    <TableroRuta visor={visor} ruta={tablero.ruta} analisis={tablero.analisis} error={tablero.error} onCerrar={() => setTablero(null)} />
                   </Suspense>
                 </div>
               </motion.div>
@@ -370,7 +407,7 @@ export default function App() {
           {/* Celular: RN11, tema y configuración arriba del dock (se ocultan mientras hay un panel abierto). */}
           <div className={`pointer-events-none absolute bottom-[100px] right-3 z-10 transition-opacity duration-300 lg:hidden ${resultados || tablero ? 'invisible opacity-0' : ''}`}>
             <div className="pointer-events-auto flex gap-2">
-              <BotonRn11 estado={rn11} onPress={() => mostrarRn11(true)} />
+              <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} />
               <BotonRedondo etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={() => cambiarTema(!oscuro)} compacto>
                 {oscuro ? <Sun size={20} weight="bold" /> : <Moon size={20} weight="bold" />}
               </BotonRedondo>
@@ -429,22 +466,24 @@ function Marca() {
   );
 }
 
-function BotonRn11({ estado, onPress }: { estado: EstadoRn11; onPress: () => void }) {
+// Sin ruta a la vista abre la RN11; con una ruta elegida (la RN11 u otra por doble clic) la oculta.
+function BotonRuta({ estado, onPress }: { estado: EstadoRuta; onPress: () => void }) {
+  const activa = estado.activa;
   return (
     <button
       type="button"
       onClick={onPress}
-      aria-pressed={estado.activa}
+      aria-pressed={!!activa}
       className={`panel flex h-[60px] w-[200px] items-center gap-3 pl-3.5 pr-4 text-left max-lg:w-auto transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 max-lg:h-12 max-lg:pr-3.5 ${
-        estado.activa ? '!bg-[var(--vial)] text-white' : 'hover:bg-[var(--superficie-2)]'
+        activa ? '!bg-[var(--vial)] text-white' : 'hover:bg-[var(--superficie-2)]'
       }`}
-      style={estado.activa ? ({ '--escudo-fondo': 'var(--vial)', '--escudo-tinta': '#fff' } as React.CSSProperties) : undefined}
+      style={activa ? ({ '--escudo-fondo': 'var(--vial)', '--escudo-tinta': '#fff' } as React.CSSProperties) : undefined}
     >
-      <EscudoRuta className={`h-8 w-auto max-lg:h-7 ${estado.cargando ? 'animate-pulse' : ''}`} />
-      <span className="flex flex-col">
-        <span className="text-[15px] font-semibold leading-tight">{estado.activa ? 'Ocultar RN11' : 'Ver RN11'}</span>
-        <span className={`text-[13px] leading-tight max-lg:hidden ${estado.activa ? 'text-white/85' : 'text-[var(--tinta-3)]'}`}>
-          {estado.cargando ? 'Cargando traza…' : estado.activa ? `${estado.tramos} tramos en Chaco` : 'Traza en Chaco'}
+      <EscudoRuta numero={activa?.numero ?? '11'} className={`h-8 w-auto max-lg:h-7 ${estado.cargando ? 'animate-pulse' : ''}`} />
+      <span className="flex min-w-0 flex-col">
+        <span className="text-[15px] font-semibold leading-tight">{activa ? `Ocultar RN${activa.numero}` : 'Ver RN11'}</span>
+        <span className={`truncate text-[13px] leading-tight max-lg:hidden ${activa ? 'text-white/85' : 'text-[var(--tinta-3)]'}`}>
+          {estado.cargando ? 'Cargando traza…' : activa ? `${estado.tramos} tramos en ${activa.provincia}` : 'Traza en Chaco'}
         </span>
       </span>
     </button>

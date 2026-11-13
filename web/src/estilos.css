@@ -156,14 +156,7 @@ input, textarea { caret-color: var(--vial); }
   transition: width 0.25s ease;
 }
 
-.minimapa .ol-overviewmap { position: static; width: 100%; height: 100%; background: none; border: none; padding: 0; border-radius: inherit; }
-.minimapa .ol-overviewmap-map { width: 100%; height: 100%; margin: 0; border: none; }
-.minimapa .ol-overviewmap .ol-overviewmap-box {
-  border: 2px solid var(--vial);
-  background: color-mix(in srgb, var(--vial) 16%, transparent);
-  border-radius: 2px;
-}
-.minimapa .ol-overviewmap button { display: none; }
+.minimapa { touch-action: none; }
 .minimapa .ol-viewport { border-radius: inherit; }
 
 /* Tema oscuro: las teselas de GeoServer están pensadas para fondo claro. Invertir y rotar el tono
@@ -221,6 +214,9 @@ input, textarea { caret-color: var(--vial); }
 
 /* Curva de iOS para lo que se despliega. */
 .despliega { animation-duration: 0.32s; animation-timing-function: var(--ios); }
+
+/* Sobre una ruta nacional el cursor avisa que se puede elegir (doble clic abre su tablero). */
+.ol-viewport.sobre-ruta { cursor: pointer; }
 
 /* Cartel con el nombre de lo que hay bajo el cursor. */
 .cartel-mapa {

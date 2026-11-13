@@ -75,7 +75,7 @@ GeoServer coincide hasta 10 km, pero a 20 km deja afuera a Puerto Bermejo Nuevo 
 - **Gráficos** (`src/componentes/ui/graficos.tsx`):
   - barras, dona y números animados;
   - colores de datos `--dato-1` y `--dato-2`, validados con el validador de paleta en claro y en oscuro (banda de luminosidad, separación para daltonismo y para visión normal).
-- **Tablero RN11** (`src/analisisRn11.ts` y `TableroRn11.tsx`): coincide con PostGIS.
+- **Tablero RN11** (`src/analisisRuta.ts` y `TableroRuta.tsx`, hoy para cualquier ruta nacional): coincide con PostGIS.
   - 172,4 km (PostGIS: 172,37 km);
   - 22 localidades y 363.320 hab. hasta 10 km;
   - 15 localidades y 26.080 hab. entre 10 y 20 km;

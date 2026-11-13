@@ -31,3 +31,19 @@ La tesela p95 sube porque cada imagen ahora trae todas las capas juntas (una tes
 ## Las teselas van por POST
 
 El SLD de las capas prendidas pesa 5–6 KB. En la URL, sumado a las cookies que el navegador manda a `localhost` (las de todas las apps que corren ahí), pasaba el límite de cabeceras de Node en el servidor de Vite (16 KB). La respuesta era un error 431 y el mapa quedaba vacío. Por eso las teselas y las leyendas con estilo propio se piden por POST, con el SLD en el cuerpo (`tileLoadFunction` de OpenLayers). En la URL va solo un hash corto del estilo, que es lo que usa la caché de nginx para distinguir cada combinación de capas. Probado con 14 KB de cookies en el navegador, tanto en `npm run dev` como en la demo de nginx. Además, `npm run dev` arranca Vite con `--max-http-header-size=65536`.
+
+## Generalización por escala
+
+A escala país el mapa se saturaba (961 ciudades rotuladas, 42.000 tramos de ríos, todas las rutas pavimentadas con el mismo peso). `web/src/estilos.ts` dibuja ahora por bandas de escala, con la misma paleta y tipografía; solo cambia qué se dibuja y con cuánto peso. Las reglas viajan en el `SLD_BODY`, así que no se toca lo publicado en GeoServer y la leyenda se actualiza sola.
+
+| Banda | Denominador | Zoom aprox. (lat. 27° S) | Qué se ve |
+|---|---|---|---|
+| País | > 1:6.000.000 | ≤ 6 | Capitales y ciudades de 100.000 hab. o más con rótulo; ríos troncales por nombre; autopistas y rutas nacionales finas |
+| Región | 1:6M – 1:2,5M | 7 | ríos con nombre «Río …»; + rutas provinciales; costa |
+| Provincia | 1:2,5M – 1:800.000 | 8–9 | + ciudades de 20.000 a 100.000 hab. con rótulo; todos los cursos perennes; pavimentado vecinal y caminos consolidados; ciudades menores, localidades y pueblos como punto (desde 1:1,5M) |
+| Local | < 1:800.000 | ≥ 10 | + acequias, canales y zanjones; rótulos de ciudades menores y localidades; parajes con rótulo desde 1:300.000 |
+
+- La jerarquía de `localidades` es el tamaño real (`canthab`: 4 / 6 / 8 px) y los rótulos se ordenan por población (`Priority`) con `spaceAround` para que no se pisen.
+- El panel de capas avisa «Aparece al acercarse» en una capa prendida que a la escala actual no dibuja nada, con un botón que acerca hasta donde aparece (`escalaMinima`). La barra de estado muestra el nombre de la banda junto a `1:N`.
+- El SLD crece unos 3 KB; viaja por POST y el hash `ESTILO` cambia, así que la caché de nginx se renueva sola.
+- `geoserver/estilos/localidades.sld` y `red_vial.sld` no se tocaron: el estilo publicado sigue siendo el de A.2.

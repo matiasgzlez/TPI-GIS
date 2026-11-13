@@ -146,8 +146,5 @@ export const tituloDeCapa = (nombre: string) => CAPAS.find(c => c.nombre === nom
 
 export const EXTENSION_CHACO = transformExtent([-63.5, -28.1, -58.3, -24.0], 'EPSG:4326', 'EPSG:3857');
 
-// La traza que analiza la parte B: ruta nacional 11 dentro de Chaco.
-export const FILTRO_RN11 = "nro_ruta = '11' AND administra = 'Nacional'";
-
 export const TIPOS_OBRA = ['bacheo', 'repavimentacion', 'banquina', 'senalizacion', 'puente', 'drenaje', 'otro'];
 export const PRIORIDADES = ['alta', 'media', 'baja'];

@@ -10,7 +10,8 @@ import { getArea, getLength } from 'ol/sphere';
 import { unByKey } from 'ol/Observable';
 import type { EventsKey } from 'ol/events';
 import { URL_WFS, WORKSPACE, tituloDeCapa } from './config';
-import { capasVisibles, estiloDibujo, urlConsultaPunto, type Visor } from './visor';
+import { capasVisibles, consultarPuntoWms, denominadorWms, estiloDibujo, type Visor } from './visor';
+import { filtroVisible } from './estilos';
 
 export type Modo = 'navegar' | 'punto' | 'rectangulo' | 'distancia' | 'area' | 'alta';
 
@@ -162,7 +163,7 @@ interface FeatureGeoJSON {
 async function consultarPunto(visor: Visor, coordenada: number[]): Promise<Consulta> {
   const nombres = capasVisibles(visor);
   if (!nombres.length) return { origen: 'punto', capas: [] };
-  const datos = await pedirJson(urlConsultaPunto(visor, coordenada, nombres));
+  const datos = await consultarPuntoWms(visor, coordenada, nombres);
   const porCapa = new Map<string, FeatureGeoJSON[]>();
   for (const f of datos.features as FeatureGeoJSON[]) {
     const capa = f.id.split('.')[0];
@@ -176,33 +177,45 @@ async function consultarPunto(visor: Visor, coordenada: number[]): Promise<Consu
   return { origen: 'punto', capas: mostrar(visor, capasConResultado) };
 }
 
-// WFS GetFeature con BBOX, una consulta por cada capa visible y un límite de entidades por capa.
+// WFS GetFeature dentro de un rectángulo, solo con lo que el estilo dibuja a la escala actual (el mismo
+// criterio que el mapa y la consulta por punto). Va por POST en WFS 1.1.0: el filtro OGC de las
+// reglas (hasta unos KB) lleva el BBOX adentro, y en 2.0.0 GeoServer no acepta filtros ogc:.
+// Devuelve null si la capa no se dibuja a esta escala.
+async function consultarCapaVisible(visor: Visor, capa: string, extension: number[]): Promise<ResultadoCapa | null> {
+  const reglas = filtroVisible(capa, denominadorWms(visor));
+  if (reglas === false) return null;
+  const [x1, y1, x2, y2] = extension;
+  const caja = '<ogc:BBOX><ogc:PropertyName>geom</ogc:PropertyName><gml:Envelope srsName="EPSG:3857">'
+    + `<gml:lowerCorner>${x1} ${y1}</gml:lowerCorner><gml:upperCorner>${x2} ${y2}</gml:upperCorner></gml:Envelope></ogc:BBOX>`;
+  const filtro = '<ogc:Filter xmlns:ogc="http://www.opengis.net/ogc" xmlns:gml="http://www.opengis.net/gml">'
+    + `${reglas ? `<ogc:And>${caja}${reglas}</ogc:And>` : caja}</ogc:Filter>`;
+  const respuesta = await fetch(URL_WFS, {
+    method: 'POST',
+    body: new URLSearchParams({
+      service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: `${WORKSPACE}:${capa}`,
+      outputFormat: 'application/json', srsName: 'EPSG:3857', maxFeatures: String(LIMITE_POR_CAPA), FILTER: filtro,
+    }),
+  });
+  const texto = await respuesta.text();
+  if (!respuesta.ok || texto.startsWith('<')) throw new Error('GeoServer no pudo responder la consulta.');
+  const datos = JSON.parse(texto);
+  return armarResultado(capa, datos.numberMatched ?? datos.totalFeatures ?? datos.features.length, datos);
+}
+
+// Una consulta por cada capa visible, con un límite de entidades por capa.
 async function consultarRectangulo(visor: Visor, extension: number[]): Promise<Consulta> {
   const nombres = [...capasVisibles(visor)].reverse();
-  const resultados = await Promise.all(nombres.map(async capa => {
-    const url = `${URL_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=${WORKSPACE}:${capa}`
-      + `&outputFormat=application/json&srsName=EPSG:3857&count=${LIMITE_POR_CAPA}&bbox=${extension.join(',')},EPSG:3857`;
-    const datos = await pedirJson(url);
-    return armarResultado(capa, datos.numberMatched ?? datos.features.length, datos);
-  }));
-  return { origen: 'rectangulo', capas: mostrar(visor, resultados.filter(r => r.total > 0)) };
+  const resultados = await Promise.all(nombres.map(capa => consultarCapaVisible(visor, capa, extension)));
+  return { origen: 'rectangulo', capas: mostrar(visor, resultados.filter((r): r is ResultadoCapa => !!r && r.total > 0)) };
 }
 
 // Una capa dentro de una extensión (la vista actual): lo usan las consultas predichas.
 export async function consultarCapaEnExtension(visor: Visor, capa: string, extension: number[]): Promise<Consulta> {
-  const url = `${URL_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=${WORKSPACE}:${capa}`
-    + `&outputFormat=application/json&srsName=EPSG:3857&count=${LIMITE_POR_CAPA}&bbox=${extension.join(',')},EPSG:3857`;
-  const datos = await pedirJson(url);
-  const resultado = armarResultado(capa, datos.numberMatched ?? datos.features.length, datos);
+  const resultado = await consultarCapaVisible(visor, capa, extension);
+  if (!resultado) return { origen: 'rectangulo', titulo: `${tituloDeCapa(capa)} no se dibuja a esta escala: acercate para verla`, capas: mostrar(visor, []) };
   return { origen: 'rectangulo', titulo: `${tituloDeCapa(capa)} en esta vista`, capas: mostrar(visor, resultado.total ? [resultado] : []) };
 }
 
-async function pedirJson(url: string) {
-  const respuesta = await fetch(url);
-  const texto = await respuesta.text();
-  if (!respuesta.ok || texto.startsWith('<')) throw new Error('GeoServer no pudo responder la consulta.');
-  return JSON.parse(texto);
-}
 
 // Campos técnicos del IGN (identificadores, metadatos de carga, símbolos de MicroStation) que no le
 // dicen nada a quien consulta el mapa.

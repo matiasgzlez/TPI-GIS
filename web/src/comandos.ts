@@ -1,5 +1,7 @@
 import { transformExtent } from 'ol/proj';
 import { GRUPOS } from './config';
+import { PROVINCIAS, tituloProvincia } from './provincias';
+import { capaSimple, HERRAMIENTAS_SIMPLES, sinSiglas, TEMATICAS } from './interfaz';
 import { HERRAMIENTAS, type Modo } from './herramientas';
 import type { Interpretacion } from './lenguaje';
 
@@ -87,6 +89,26 @@ export const DESTACADAS = ['accion:rn11', 'lugar:resistencia', 'herramienta:dist
 
 export const normalizar = (texto: string) => texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
+// "ruta 16", "rn 81 en formosa", "nacional 40 mendoza": el tablero de cualquier ruta nacional en una
+// provincia que la tenga (antes solo se llegaba con doble clic sobre la ruta). Sin provincia, Chaco
+// primero y después las demás por las que pasa.
+export function rutasSugeridas(texto: string): Sugerencia[] {
+  const t = normalizar(texto);
+  const coincidencia = t.match(/\b(?:rn|ruta(?:\s+nacional)?|nacional)\s*(\d{1,3})\b(.*)$/);
+  if (!coincidencia) return [];
+  const [, numero, resto] = coincidencia;
+  const lugar = normalizar(resto.replace(/^\s*(?:en|de|por)\s+/, ''));
+  const conRuta = PROVINCIAS.filter(p => p.rutas.includes(numero))
+    .filter(p => !lugar || normalizar(p.titulo).startsWith(lugar) || normalizar(p.nombre).startsWith(lugar))
+    .sort((a, b) => Number(b.nombre === 'Chaco') - Number(a.nombre === 'Chaco'));
+  return conRuta.slice(0, 4).map(p => ({
+    id: `ruta:${numero}|${p.nombre}`,
+    tipo: 'accion' as const,
+    titulo: `Ver la RN${numero} en ${p.titulo}`,
+    detalle: 'Km, población a 10 y 20 km y puentes',
+  }));
+}
+
 // Todas las palabras escritas tienen que aparecer. Pesa más que coincidan al comienzo de una palabra
 // ("rio" → Cursos de agua por el sinónimo "rios", no Edificios ferroviarios) y, sobre todo, del título.
 export function buscar(texto: string): { acciones: Sugerencia[]; capas: Sugerencia[] } {
@@ -102,7 +124,8 @@ export function buscar(texto: string): { acciones: Sugerencia[]; capas: Sugerenc
   const ordenar = (lista: Sugerencia[], maximo: number) => lista
     .map(s => [s, puntuar(s)] as const).filter(([, p]) => p > 0)
     .sort((a, b) => b[1] - a[1]).slice(0, maximo).map(([s]) => s);
-  return { acciones: ordenar([...ACCIONES, ...HERRAMIENTAS_SUGERIDAS], 4), capas: ordenar(CAPAS_SUGERIDAS, 5) };
+  const rutas = rutasSugeridas(texto);
+  return { acciones: [...rutas, ...ordenar([...ACCIONES, ...HERRAMIENTAS_SUGERIDAS], 4 - Math.min(rutas.length, 2))], capas: ordenar(CAPAS_SUGERIDAS, 5) };
 }
 
 // --- Historial (en el navegador; si no hay almacenamiento, vale solo para esta sesión) ---
@@ -135,4 +158,42 @@ export function borrarHistorial() {
   } catch {
     // Nada que borrar.
   }
+}
+
+// --- Modo simple: las mismas sugerencias, con palabras de todos los días ---
+
+const ACCIONES_SIMPLES: Record<string, [titulo: string, detalle: string]> = {
+  'accion:rn11': ['Ver la ruta 11', 'Qué tan larga es y cuánta gente vive cerca'],
+  'accion:chaco': ['Ver todo el Chaco', 'Muestra la provincia entera'],
+  'accion:apagar': ['Borrar todo del mapa', 'Deja el mapa vacío'],
+  'accion:restablecer': ['Volver al mapa del principio', 'Lo que se veía al abrir'],
+  'accion:tema': ['Cambiar a día o noche', 'Colores claros u oscuros'],
+};
+export const SECCIONES_SIMPLES: Record<string, string> = { Capas: 'Cosas para ver', Acciones: 'Atajos', 'Rutas nacionales': 'Rutas', Sugerencias: 'Para empezar' };
+
+export function paraModoSimple(s: Sugerencia): Sugerencia {
+  const [tipo, valor] = [s.id.slice(0, s.id.indexOf(':')), s.id.slice(s.id.indexOf(':') + 1)];
+  if (ACCIONES_SIMPLES[s.id]) return { ...s, titulo: ACCIONES_SIMPLES[s.id][0], detalle: ACCIONES_SIMPLES[s.id][1] };
+  if (tipo === 'herramienta') {
+    const h = HERRAMIENTAS_SIMPLES[valor as Modo];
+    return { ...s, titulo: h.titulo, detalle: h.pista };
+  }
+  if (tipo === 'capa') {
+    const capa = capaSimple(valor);
+    const tematica = TEMATICAS.find(t => t.capas.some(c => c.nombre === valor));
+    return { ...s, titulo: capa?.titulo ?? s.titulo, detalle: tematica ? `${tematica.titulo} · ${capa?.frase ?? ''}` : s.detalle };
+  }
+  if (tipo === 'ruta') {
+    const [numero, provincia] = valor.split('|');
+    return { ...s, titulo: `Ver la ruta ${numero} en ${tituloProvincia(provincia)}`, detalle: 'Qué tan larga es, cuánta gente vive cerca y sus puentes' };
+  }
+  if (tipo === 'pregunta') {
+    const intencion = s.interpretacion?.intencion;
+    return {
+      ...s,
+      titulo: sinSiglas(s.titulo),
+      detalle: intencion === 'tablero' ? 'Qué tan larga es y cuánta gente vive cerca' : intencion === 'poblacion' ? 'Contamos cuánta gente vive' : 'Te lo mostramos en el mapa',
+    };
+  }
+  return { ...s, titulo: sinSiglas(s.titulo), detalle: sinSiglas(s.detalle) };
 }

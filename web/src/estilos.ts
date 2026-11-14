@@ -138,19 +138,22 @@ const NARANJA = '#E67E22';
 const REGLAS: Record<string, Regla[]> = {
   curso_de_agua_hid: [
     { titulo: 'Curso perenne', filtro: todos(igual('regimen', 'Permanente'), igual('tipo', 'Corriente de Agua Perenne')),
-      hasta: REGION, simbolo: linea(AGUA, 0.9, undefined, 0.85) },
+      hasta: 1_500_000, simbolo: linea(AGUA, 0.9, undefined, 0.85) },
+    // En la vista inicial (Chaco entero) los arroyos eran una maraña: entre 1:1.500.000 y la región, solo los ríos.
+    { titulo: 'Río', filtro: todos(igual('regimen', 'Permanente'), como('nombre', 'Río %')),
+      desde: 1_500_000, hasta: REGION, sinLeyenda: true, simbolo: linea(AGUA, 0.8, undefined, 0.8) },
     { titulo: 'Acequia, canal o zanjón', filtro: todos(igual('regimen', 'Permanente'), no(igual('tipo', 'Corriente de Agua Perenne'))),
       hasta: PROVINCIA, simbolo: linea(AGUA, 0.9, undefined, 0.85) },
-    { titulo: 'Río', filtro: todos(igual('regimen', 'Permanente'), como('nombre', 'Río %')),
-      desde: REGION, hasta: PAIS, sinLeyenda: true, simbolo: linea(AGUA, 0.7, undefined, 0.75) },
+    // De lejos (región y país) solo los ríos troncales: los "Río …" permanentes eran una telaraña.
     { titulo: 'Río troncal', filtro: cualquiera('nombre', RIOS_TRONCALES),
-      desde: PAIS, hasta: 12_000_000, sinLeyenda: true, simbolo: linea(AGUA, 0.7, undefined, 0.6) },
+      desde: REGION, hasta: 12_000_000, sinLeyenda: true, simbolo: linea(AGUA, 0.8, undefined, 0.7) },
     { titulo: 'Curso intermitente', filtro: igual('regimen', 'Intermitente'), hasta: 1_500_000, simbolo: linea(AGUA, 0.6, '3 2.5', 0.6) },
   ],
   espejo_de_agua_hid: [
     { titulo: 'Lago o laguna perenne', filtro: igual('tipo', 'Lago o Laguna Perenne'), simbolo: relleno(AGUA_CLARA) },
-    { titulo: 'Lago o laguna intermitente', filtro: igual('tipo', 'Lago o Laguna Intermitente'), simbolo: relleno(AGUA_CLARA, 0.55) },
-    { titulo: 'Bañado y estero', filtro: cualquiera('tipo', ['Bañado Perenne', 'Bañado Intermitente', 'Estero']), simbolo: relleno('#b9d3c4', 0.6) },
+    // Son 26 000 polígonos: de lejos los chicos e intermitentes eran un salpicado sin información.
+    { titulo: 'Lago o laguna intermitente', filtro: igual('tipo', 'Lago o Laguna Intermitente'), hasta: REGION, simbolo: relleno(AGUA_CLARA, 0.55) },
+    { titulo: 'Bañado y estero', filtro: cualquiera('tipo', ['Bañado Perenne', 'Bañado Intermitente', 'Estero']), hasta: PROVINCIA, simbolo: relleno('#b9d3c4', 0.6) },
   ],
   limite_politico_administrativo_lim: [
     { titulo: 'Límite internacional', filtro: igual('tipo', 'Limite Internacional'), simbolo: linea('#3b4047', 1.4, '7 3 1.5 3') },
@@ -161,9 +164,7 @@ const REGLAS: Record<string, Regla[]> = {
   provincias: [
     { titulo: 'Provincia del Chaco', filtro: igual('provincia', 'Chaco'), simbolo: relleno('#FBEFD5', 1, ['#8C6D46', 1.6]) },
     { titulo: 'Otras provincias', filtro: RESTO, simbolo: relleno('#F2F0EC', 1, ['#9A9087', 0.8]) },
-    // Más cerca el nombre de la provincia compite con las localidades.
-    { titulo: 'Nombre de provincia', desde: REGION, encima: true, sinLeyenda: true,
-      simbolo: rotulo({ campo: 'provincia', tamano: 11, color: '#5D4E3F', ajuste: 80 }) },
+    // El nombre de la provincia lo pinta el visor (rotulosProvincia): en teselas se repetía en cada una.
   ],
   localidades: [
     { titulo: 'Paraje o caserío', filtro: PARAJE, hasta: 1_000_000, simbolo: punto('#BDBDBD', 3, 'circle', '#ffffff', 0) },
@@ -172,13 +173,15 @@ const REGLAS: Record<string, Regla[]> = {
     { titulo: 'Rótulo de localidad', filtro: MENOR, hasta: 600_000, sinLeyenda: true, simbolo: rotulo({ campo: 'nombre', tamano: 9, dx: 5, prioridad: 'canthab' }) },
     { titulo: 'Ciudad o cabecera menor', filtro: CIUDAD_CHICA, hasta: 1_500_000, simbolo: punto(ROJO_CIUDAD, 4, 'circle', '#FFFFFF', 0.8) },
     { titulo: 'Rótulo de ciudad menor', filtro: CIUDAD_CHICA, hasta: PROVINCIA, sinLeyenda: true, simbolo: rotulo({ campo: 'nombre', tamano: 10, dx: 5, prioridad: 'canthab' }) },
-    { titulo: 'Ciudad de 20.000 a 100.000 hab.', filtro: CIUDAD_MEDIANA, hasta: REGION,
-      simbolo: punto(ROJO_CIUDAD, 6, 'circle', '#FFFFFF', 0.8) + rotulo({ campo: 'nombre', tamano: 10, dx: 5, prioridad: 'canthab' }) },
-    { titulo: 'Ciudad de 100.000 hab. o más', filtro: CIUDAD_GRANDE, hasta: 10_000_000,
-      simbolo: punto(ROJO_CIUDAD, 8, 'circle', '#FFFFFF', 0.8) + rotulo({ campo: 'nombre', tamano: 10, dx: 6, prioridad: 'canthab' }) },
+    { titulo: 'Ciudad de 20.000 a 100.000 hab.', filtro: CIUDAD_MEDIANA, hasta: REGION, simbolo: punto(ROJO_CIUDAD, 6, 'circle', '#FFFFFF', 0.8) },
+    { titulo: 'Rótulo de ciudad mediana', filtro: CIUDAD_MEDIANA, hasta: REGION, sinLeyenda: true, simbolo: rotulo({ campo: 'nombre', tamano: 10, dx: 5, prioridad: 'canthab' }) },
+    { titulo: 'Ciudad de 100.000 hab. o más', filtro: CIUDAD_GRANDE, hasta: 10_000_000, simbolo: punto(ROJO_CIUDAD, 8, 'circle', '#FFFFFF', 0.8) },
+    // A escala país hablan los nombres de provincia (los pinta el visor): los de ciudad se pisaban con ellos.
+    { titulo: 'Rótulo de ciudad grande', filtro: CIUDAD_GRANDE, hasta: PAIS, sinLeyenda: true, simbolo: rotulo({ campo: 'nombre', tamano: 10, dx: 6, prioridad: 'canthab' }) },
     // Las capitales van en un FeatureTypeStyle aparte para dibujarse encima del resto.
-    { titulo: 'Capital nacional o provincial', filtro: CAPITAL, encima: true,
-      simbolo: punto('#B71C1C', 12, 'star', '#FFFFFF', 0.8) + rotulo({ campo: 'nombre', tamano: 11, negrita: true, color: '#222222', dx: 8, prioridad: 100_000 }) },
+    { titulo: 'Capital nacional o provincial', filtro: CAPITAL, encima: true, simbolo: punto('#B71C1C', 12, 'star', '#FFFFFF', 0.8) },
+    // El nombre de las capitales lo pinta el visor (CAPITALES en provincias.ts): en teselas se perdía en
+    // el borde entre dos y Resistencia quedaba sin rótulo.
   ],
   red_vial: [
     // Los caminos de tierra son 93 000 tramos: solo se dibujan de 1:1.500.000 en adelante.
@@ -188,7 +191,6 @@ const REGLAS: Record<string, Regla[]> = {
       hasta: REGION, simbolo: linea('#8D6E63', 1, '4 2') },
     { titulo: 'Camino pavimentado vecinal', filtro: VIAL_VECINAL, hasta: REGION, simbolo: linea(NARANJA, 1.6) },
     { titulo: 'Camino pavimentado provincial', filtro: VIAL_PROVINCIAL, hasta: REGION, simbolo: linea(NARANJA, 1.6) },
-    { titulo: 'Camino pavimentado provincial', filtro: VIAL_PROVINCIAL, desde: REGION, hasta: PAIS, sinLeyenda: true, simbolo: linea(NARANJA, 1) },
     { titulo: 'Camino pavimentado nacional', filtro: VIAL_NACIONAL, hasta: REGION, simbolo: linea(NARANJA, 1.6) },
     { titulo: 'Camino pavimentado nacional', filtro: VIAL_NACIONAL, desde: REGION, hasta: PAIS, sinLeyenda: true, simbolo: linea(NARANJA, 1.3) },
     { titulo: 'Camino pavimentado nacional', filtro: VIAL_NACIONAL, desde: PAIS, sinLeyenda: true, simbolo: linea(NARANJA, 1) },
@@ -196,6 +198,9 @@ const REGLAS: Record<string, Regla[]> = {
     { titulo: 'Autopista', filtro: igual('tipo', 'Autopista con Camino Pavimentado Dual con Separador'), desde: REGION, sinLeyenda: true, simbolo: linea('#C0392B', 2) },
   ],
   isla: [{ titulo: 'Isla', simbolo: relleno('#dfe3d5') }],
+  // Con el estilo por defecto de GeoServer eran manchas negras y cuadrados rojos en la vista inicial.
+  veg_hidrofila: [{ titulo: 'Vegetación hidrófila', hasta: REGION, simbolo: relleno('#b9d3c4', 0.55) }],
+  infraestructura_hidro: [{ titulo: 'Infraestructura hídrica', hasta: 1_500_000, simbolo: punto(AGUA, 7, 'square') }],
   edif_educacion: [{ titulo: 'Establecimiento educativo', hasta: 1_500_000, simbolo: punto('#3d6fb0', 7) }],
   edificio_de_salud_ips: [{ titulo: 'Establecimiento de salud', hasta: 3_000_000, simbolo: punto('#2f8f6b', 9, 'cross') }],
   edificio_de_seguridad_ips: [{ titulo: 'Seguridad', hasta: 1_500_000, simbolo: punto('#5b5f66', 7, 'square') }],
@@ -218,15 +223,120 @@ export function escalaMinima(nombre: string): number | undefined {
   return Math.max(...reglas.map(r => r.hasta!));
 }
 
+// Lo que el estilo dibuja de una capa a una escala (denominador como lo calcula GeoServer, ver
+// denominadorWms), para que las consultas devuelvan solo lo que se ve:
+// - false: a esta escala la capa no dibuja nada;
+// - null: dibuja todas sus entidades (alguna regla activa no tiene filtro, o es el "resto");
+// - un fragmento de filtro OGC: el OR de los filtros de las reglas activas.
+export function filtroVisible(nombre: string, denominador: number): string | null | false {
+  const reglas = REGLAS[nombre];
+  if (!reglas) {
+    const umbral = UMBRALES_PUBLICADOS[nombre];
+    return umbral !== undefined && denominador >= umbral ? false : null;
+  }
+  const activas = reglas.filter(r => (!r.desde || denominador >= r.desde) && (!r.hasta || denominador < r.hasta));
+  if (!activas.length) return false;
+  if (activas.some(r => r.filtro === undefined || r.filtro === RESTO)) return null;
+  const filtros = [...new Set(activas.map(r => r.filtro!))];
+  return filtros.length === 1 ? filtros[0] : `<ogc:Or>${filtros.join('')}</ogc:Or>`;
+}
+
+// En pantallas grandes (factorPantalla) los rótulos y símbolos del WMS crecen con la interfaz. Solo
+// cambian tamaños: las escalas de las reglas siguen iguales, así la consulta sigue la misma lógica.
+let factorMapa = 1;
+export const ponerFactorMapa = (factor: number) => {
+  factorMapa = factor;
+};
+export const tamanoMapa = (px: number) => px * factorMapa;
+function agrandarSld(xml: string) {
+  if (factorMapa === 1) return xml;
+  const f = factorMapa;
+  const trazo = 1 + (f - 1) * 0.6;
+  return xml
+    .replace(/(<CssParameter name="font-size">)([\d.]+)/g, (_, a, n) => `${a}${(Number(n) * f).toFixed(1)}`)
+    .replace(/<Size>([\d.]+)<\/Size>/g, (_, n) => `<Size>${(Number(n) * f).toFixed(1)}</Size>`)
+    .replace(/(<CssParameter name="stroke-width">)([\d.]+)/g, (_, a, n) => `${a}${(Number(n) * trazo).toFixed(2)}`)
+    .replace(/(<Radius>)([\d.]+)/g, (_, a, n) => `${a}${(Number(n) * f).toFixed(1)}`);
+}
+
 // Un solo SLD con todas las capas prendidas, en orden de dibujo: GeoServer devuelve una imagen por
 // tesela en lugar de una por capa, y resuelve juntos los rótulos de todas las capas.
-export const sldDeCapas = (nombres: string[]) => sld(nombres.map(n => capa(n, REGLAS[n])).join(''));
+// `sinRotulos`: capas cuyos rótulos se callan (las reglas "Rótulo de …"). Con el tablero abierto los
+// nombres de localidades los pinta el visor junto a las burbujas: los del WMS quedaban tapados por ellas.
+export const sldDeCapas = (nombres: string[], sinRotulos: ReadonlySet<string> = new Set()) =>
+  agrandarSld(sld(nombres.map(n => capa(n, sinRotulos.has(n) ? REGLAS[n]?.filter(r => !r.titulo.startsWith('Rótulo')) : REGLAS[n])).join('')));
 
-// Para GetLegendGraphic: solo las capas con estilo propio necesitan mandarlo.
-export const sldDeLeyenda = (nombre: string) => (REGLAS[nombre] ? sld(capa(nombre, REGLAS[nombre], true)) : undefined);
+// Modo simple: los títulos de la leyenda con palabras de todos los días (mismos símbolos y colores).
+const TITULOS_SIMPLES: Record<string, string> = {
+  'Curso perenne': 'Río o arroyo con agua todo el año', 'Acequia, canal o zanjón': 'Canal o zanja', 'Curso intermitente': 'Arroyo que a veces se seca',
+  'Lago o laguna perenne': 'Laguna', 'Lago o laguna intermitente': 'Laguna que a veces se seca', 'Bañado y estero': 'Bañado',
+  'Límite internacional': 'Borde con otro país', 'Límite provincial': 'Borde entre provincias', Costa: 'Costa',
+  'Paraje o caserío': 'Paraje', 'Localidad, pueblo o colonia': 'Pueblo', 'Ciudad o cabecera menor': 'Ciudad chica',
+  'Ciudad de 20.000 a 100.000 hab.': 'Ciudad mediana', 'Ciudad de 100.000 hab. o más': 'Ciudad grande', 'Capital nacional o provincial': 'Capital',
+  'Camino de tierra': 'Camino de tierra', 'Camino consolidado': 'Camino de ripio', 'Camino pavimentado vecinal': 'Calle o camino de asfalto',
+  'Camino pavimentado provincial': 'Ruta provincial', 'Camino pavimentado nacional': 'Ruta nacional', Autopista: 'Autopista',
+  'Establecimiento educativo': 'Escuela', 'Establecimiento de salud': 'Hospital', Seguridad: 'Policía o bomberos', Edificación: 'Casa o galpón',
+  'Marca o señal': 'Mojón', 'Punto del terreno': 'Punto medido', 'Vegetación hidrófila': 'Plantas de agua', 'Infraestructura hídrica': 'Obra de agua',
+  'Provincia del Chaco': 'El Chaco', 'Otras provincias': 'Otras provincias',
+};
+// Las obras usan el estilo publicado en GeoServer (geoserver/estilos/obras_rn11.sld): para la leyenda
+// simple se repiten sus reglas, con la urgencia en vez de "prioridad".
+const OBRAS_SIMPLE: Regla[] = [
+  { titulo: 'Poco urgente', filtro: igual('prioridad', 'baja'), simbolo: punto('#FBC02D', 12) },
+  { titulo: 'Urgente', filtro: igual('prioridad', 'media'), simbolo: punto('#F57C00', 12) },
+  { titulo: 'Muy urgente', filtro: igual('prioridad', 'alta'), simbolo: punto('#D32F2F', 14) },
+  { titulo: 'Sin urgencia marcada', filtro: RESTO, simbolo: punto('#9E9E9E', 12) },
+];
 
-// Minimapa: provincias en gris y Chaco en naranja vial, legible a 130 px.
+// Para GetLegendGraphic: solo las capas con estilo propio necesitan mandarlo (y en el modo simple, las obras).
+export function sldDeLeyenda(nombre: string, simple = false) {
+  if (simple && nombre === 'obras_rn11') return sld(capa(nombre, OBRAS_SIMPLE, true));
+  if (!REGLAS[nombre]) return undefined;
+  const reglas = simple ? REGLAS[nombre].map(r => ({ ...r, titulo: TITULOS_SIMPLES[r.titulo] ?? r.titulo })) : REGLAS[nombre];
+  return sld(capa(nombre, reglas, true));
+}
+
+// Miniaturas de las capas (las tarjetas del modo simple y el árbol del profesional): las provincias de
+// fondo y la capa con sus mismas reglas, pero sin escalas (a 320 px casi todas quedarían vacías), sin
+// rótulos y sin los duplicados por banda. Las que no tienen reglas propias van con un símbolo genérico
+// por geometría: su estilo publicado en GeoServer tiene umbrales de escala y saldrían vacías.
+const GENERICO = {
+  punto: punto('#3d6fb0', 6),
+  linea: linea('#5d636b', 1.2),
+  poligono: relleno('#9bb07f', 0.7, ['#6f8a55', 0.5]),
+};
+const FONDO_MINIATURA = capa('provincias', [
+  { titulo: 'Chaco', filtro: igual('provincia', 'Chaco'), simbolo: relleno('#FBEFD5', 1, ['#8C6D46', 1.2]) },
+  { titulo: 'Otras', filtro: RESTO, simbolo: relleno('#F2F0EC', 1, ['#b9b1a6', 0.6]) },
+]);
+const sinRotulo = (simbolo: string) => simbolo.replace(/<TextSymbolizer>[\s\S]*?<\/TextSymbolizer>/g, '');
+
+// `realce`: capas con pocos puntos (hospitales, turismo, puertos…): los símbolos se agrandan para que la
+// miniatura no parezca vacía.
+const agrandar = (simbolo: string) => simbolo.replace(/<Size>([\d.]+)<\/Size>/g, (_, n) => `<Size>${Math.max(14, Math.round(Number(n) * 2.2))}</Size>`);
+
+export function sldMiniatura(nombre: string, geometria: 'punto' | 'linea' | 'poligono', realce = false) {
+  if (nombre === 'provincias') return sld(FONDO_MINIATURA);
+  // Las obras arrancan vacías: la miniatura muestra la traza de la RN11, que es dónde van.
+  if (nombre === 'obras_rn11') {
+    return sld(FONDO_MINIATURA + capa('red_vial', [{ titulo: 'RN11', filtro: todos(igual('nro_ruta', '11'), igual('administra', 'Nacional')), simbolo: linea('#e5521f', 3) }]));
+  }
+  // Las islas del Paraná son finitas: con el relleno del mapa casi no se distinguían del agua.
+  if (nombre === 'isla') return sld(FONDO_MINIATURA + capa('isla', [{ titulo: 'Isla', simbolo: relleno('#b9c99a', 1, ['#5f7a45', 0.9]) }]));
+  const reglas = REGLAS[nombre]
+    ?.filter(r => !r.sinLeyenda && !r.titulo.startsWith('Rótulo'))
+    .map(r => ({ ...r, desde: undefined, hasta: undefined, simbolo: realce ? agrandar(sinRotulo(r.simbolo)) : sinRotulo(r.simbolo) }))
+    .filter(r => r.simbolo);
+  // Los muros de embalse son 9 líneas cortas, invisibles a escala país: llevan además un marcador (un
+  // PointSymbolizer sobre una línea se dibuja en su punto medio).
+  const base = nombre === 'muro_embalse' ? GENERICO.linea + punto('#5d636b', 7, 'square') : GENERICO[geometria];
+  const generico = realce ? agrandar(base) : base;
+  return sld(FONDO_MINIATURA + capa(nombre, reglas?.length ? reglas : [{ titulo: nombre, simbolo: generico }]));
+}
+
+// Minimapa: provincias en gris claro y Chaco en gris oscuro, legible a 130 px.
 export const ESTILO_MINIMAPA = sld(capa('provincias', [
-  { titulo: 'Chaco', filtro: igual('provincia', 'Chaco'), simbolo: relleno('#e5521f', 0.9) },
+  // Chaco en gris oscuro: el naranja queda para el recuadro de la vista, que si no se perdía encima.
+  { titulo: 'Chaco', filtro: igual('provincia', 'Chaco'), simbolo: relleno('#7d857c') + linea('#f6f7f4', 0.8) },
   { titulo: 'Otras provincias', filtro: RESTO, simbolo: relleno('#cfd4cd') + linea('#f6f7f4', 0.8) },
 ]));

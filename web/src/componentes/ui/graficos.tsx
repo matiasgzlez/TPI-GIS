@@ -14,7 +14,8 @@ export function NumeroAnimado({ valor, decimales = 0, className }: { valor: numb
       actual.set(valor);
       return;
     }
-    const control = animate(actual, valor, { type: 'spring', stiffness: 90, damping: 22, restDelta: 0.5 });
+    // Al terminar, el valor exacto: el resorte se detiene a medio punto y se llegaba a ver 389.399.
+    const control = animate(actual, valor, { type: 'spring', stiffness: 90, damping: 22, restDelta: 0.5, onComplete: () => actual.set(valor) });
     return () => control.stop();
   }, [valor, reducido, actual]);
   return <motion.span className={className}>{texto}</motion.span>;
@@ -123,6 +124,42 @@ export function Dona({ segmentos, centro, detalle, tamano = 132 }: { segmentos: 
               <span className="block font-medium leading-snug">{s.etiqueta}</span>
               <span className="text-[13px] text-[var(--tinta-3)]">{formatoAR(s.valor)} · {formatoAR((s.valor / total) * 100)} %</span>
             </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Total grande y una barra apilada: a diferencia de la dona, una parte chica (2 % de 541.319) sigue
+// viéndose (cada tramo tiene un mínimo de 6 px) y las cifras se leen en la misma línea que su color.
+export function BarraApilada({ segmentos, total, detalle }: { segmentos: SegmentoDona[]; total: React.ReactNode; detalle: string }) {
+  const suma = segmentos.reduce((s, x) => s + x.valor, 0) || 1;
+  return (
+    <div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-[40px] font-semibold leading-none tracking-[-0.03em]">{total}</span>
+        <span className="text-[16px] font-medium text-[var(--tinta-2)]">{detalle}</span>
+      </div>
+      <div className="mt-4 flex h-3.5 gap-1 overflow-hidden" role="img" aria-label={segmentos.map(s => `${s.etiqueta}: ${s.valor.toLocaleString('es-AR')}`).join('; ')}>
+        {segmentos.map((s, i) => (
+          <motion.span
+            key={s.id}
+            className="h-full min-w-[6px] rounded-full"
+            style={{ backgroundColor: s.color }}
+            initial={{ flexGrow: 0.0001 }}
+            animate={{ flexGrow: Math.max(s.valor / suma, 0.0001) }}
+            transition={{ type: 'spring', stiffness: 160, damping: 26, delay: 0.08 * i }}
+          />
+        ))}
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {segmentos.map(s => (
+          <li key={s.id} className="flex items-baseline gap-2 text-[14px]">
+            <span className="size-2.5 shrink-0 translate-y-[-1px] rounded-full" style={{ backgroundColor: s.color }} />
+            <span className="flex-1 text-[var(--tinta-2)]">{s.etiqueta}</span>
+            <span className="font-semibold tabular-nums">{s.valor.toLocaleString('es-AR')}</span>
+            <span className="w-11 text-right tabular-nums text-[var(--tinta-3)]">{Math.round((s.valor / suma) * 100)} %</span>
           </li>
         ))}
       </ul>

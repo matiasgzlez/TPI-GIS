@@ -41,11 +41,14 @@
   --superficie-3: #e9ebe8;
   --tinta: #15171a;
   --tinta-2: #4a5056;
-  --tinta-3: #6b7178;
+  /* AA también sobre --superficie-3 (el fondo al pasar el mouse): #656b72 daba 4,49:1 ahí. */
+  --tinta-3: #5e646b;
   --linea: #e4e6e3;
   --vial: #e5521f;
   --vial-texto: #b93f12;
   --vial-suave: #fdebe3;
+  /* Fondo de lo activo con texto blanco encima (el botón de la ruta): 5,6:1. --vial daba 3,77:1. */
+  --vial-fuerte: #b93f12;
   --sombra: 0 1px 2px rgba(21, 23, 26, 0.06), 0 10px 30px -10px rgba(21, 23, 26, 0.18);
   --sombra-alta: 0 2px 4px rgba(21, 23, 26, 0.06), 0 24px 48px -16px rgba(21, 23, 26, 0.28);
 
@@ -81,6 +84,7 @@
   --vial: #ff6a33;
   --vial-texto: #ff8a5c;
   --vial-suave: #3a2219;
+  --vial-fuerte: #b5400f;
   --sombra: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -12px rgba(0, 0, 0, 0.7);
   --sombra-alta: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 56px -16px rgba(0, 0, 0, 0.8);
 
@@ -123,6 +127,8 @@ body {
 input, textarea { caret-color: var(--vial); }
 :focus-visible { outline-color: var(--vial); }
 .desplazable { scrollbar-width: thin; scrollbar-color: var(--superficie-3) transparent; }
+.desplazable-x { scrollbar-width: none; mask-image: linear-gradient(90deg, transparent, #000 20px, #000 calc(100% - 28px), transparent); }
+.desplazable-x::-webkit-scrollbar { display: none; }
 
 /* --- OpenLayers --- */
 
@@ -158,6 +164,8 @@ input, textarea { caret-color: var(--vial); }
 
 .minimapa { touch-action: none; }
 .minimapa .ol-viewport { border-radius: inherit; }
+.minimapa { transition: opacity 300ms var(--ios), scale 300ms var(--ios); }
+.minimapa.minimapa-lejos { opacity: 0; scale: 0.94; pointer-events: none; visibility: hidden; transition: opacity 300ms var(--ios), scale 300ms var(--ios), visibility 0s 300ms; }
 
 /* Tema oscuro: las teselas de GeoServer están pensadas para fondo claro. Invertir y rotar el tono
    mantiene los colores reconocibles (agua azul, rutas naranjas) y pasa los rótulos a claro.
@@ -189,9 +197,17 @@ input, textarea { caret-color: var(--vial); }
    Los paneles van en una capa con zoom; el mapa no (OpenLayers calcula mal el cursor bajo zoom).
    Adentro se mide con unidades del contenedor (cqw/cqh), no de la ventana. En celular, sin zoom. */
 .interfaz { position: fixed; inset: 0; pointer-events: none; z-index: 10; container-type: size; }
+/* Lo que se monta fuera de .interfaz (diálogos a pantalla completa, el cartel del mapa, listas en
+   portal) usa las mismas reglas para crecer igual en la tele: .pantalla-escalada para capas de pantalla
+   completa, .escalado para un bloque suelto y --zoom-ui para tamaños que no pueden llevar zoom.
+   Estas solo crecen (nunca menos de 1): en la notebook la guía y el cartel quedaban más chicos. */
+:root { --zoom-ui: 1; --zoom-interfaz: 1; }
 @media (min-width: 1024px) {
+  /* --zoom-interfaz: el mismo de .interfaz, para listas en portal que acompañan a un control de adentro. */
+  :root { --zoom-ui: max(1, var(--escala, 0.88)); --zoom-interfaz: var(--escala, 0.88); }
   .interfaz { zoom: var(--escala, 0.88); width: calc(100vw / var(--escala, 0.88)); height: calc(100vh / var(--escala, 0.88)); }
-  .escalado { zoom: var(--escala, 0.88); }
+  .pantalla-escalada { zoom: var(--zoom-ui); width: calc(100vw / var(--zoom-ui)); height: calc(100vh / var(--zoom-ui)); }
+  .escalado, .cartel-mapa { zoom: var(--zoom-ui); }
 }
 
 [data-movimiento="reducido"] *, [data-movimiento="reducido"] *::before, [data-movimiento="reducido"] *::after {
@@ -239,12 +255,28 @@ input, textarea { caret-color: var(--vial); }
 :root { --dato-1: #c2410c; --dato-2: #ec8455; --dato-pista: #eef0ed; }
 .dark { --dato-1: #e05f2a; --dato-2: #97462a; --dato-pista: #262a2f; }
 
-/* Deslizador (opacidad de capa): carril fino y botón redondo como el de iOS. */
+/* Deslizador (opacidad de capa): carril fino y botón redondo como el de iOS. 28 px: con el zoom de la
+   notebook (0,88) queda en unos 24,6 px en pantalla. */
 .deslizador { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 999px; background: var(--superficie-3); outline: none; }
 .deslizador::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 999px; background: #fff;
+  -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border-radius: 999px; background: #fff;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18), 0 0 1px rgba(0, 0, 0, 0.35); cursor: grab; transition: transform 0.2s var(--ios);
 }
 .deslizador:active::-webkit-slider-thumb { transform: scale(1.12); cursor: grabbing; }
-.deslizador::-moz-range-thumb { width: 22px; height: 22px; border: none; border-radius: 999px; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18); }
+.deslizador::-moz-range-thumb { width: 28px; height: 28px; border: none; border-radius: 999px; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18); }
 .deslizador:focus-visible { outline: 2px solid var(--vial); outline-offset: 4px; }
+
+/* --- Temáticas del modo simple: un color por temática, para el dibujo y el acento de su tarjeta --- */
+:root {
+  --tema-ruta: #e5521f; --tema-pueblos: #d6336c; --tema-caminos: #c77a12; --tema-agua: #2f7fc1;
+  --tema-servicios: #6d4fc9; --tema-naturaleza: #3f8f4f; --tema-relieve: #8a6a3f; --tema-energia: #c9a10a; --tema-trabajo: #4b6b86;
+}
+.dark {
+  --tema-ruta: #ff6a33; --tema-pueblos: #f06595; --tema-caminos: #f0a43a; --tema-agua: #5aa9e6;
+  --tema-servicios: #9b85ec; --tema-naturaleza: #66bb76; --tema-relieve: #c09a6a; --tema-energia: #f2c94c; --tema-trabajo: #7fa1bf;
+}
+/* En oscuro no se invierten (quedaban casi negras): se ven como una foto, apenas atenuadas. */
+.dark .miniatura { filter: brightness(0.84) saturate(0.92); }
+
+/* La escala gráfica nunca se parte en dos renglones ("20 / km") en la fila compacta del celular. */
+.escala .ol-scale-line-inner { white-space: nowrap; }

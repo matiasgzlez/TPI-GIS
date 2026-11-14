@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@heroui/react';
 import { X, CaretDown, ArrowsOutSimple } from '@phosphor-icons/react';
 import { buffer } from 'ol/extent';
 import type { Consulta, Entidad, Medicion } from '../herramientas';
 import { volarA, type Visor } from '../visor';
-import { datosClave, nombreDe, rotulo } from '../entidades';
+import { datosClave, datosSimples, nombrePro, nombreSimple, rotulo, rotuloSimple, tipoSimple } from '../entidades';
 import { Barras, NumeroAnimado } from './ui/graficos';
+import { capaSimple, sinSiglas, tituloSimple, useInterfaz, useVoz } from '../interfaz';
+import { tituloDeCapa } from '../config';
+import { ubicarEntidades } from '../cercanias';
 
 export type EstadoResultados =
   | { tipo: 'cargando'; origen: Consulta['origen'] }
@@ -19,15 +22,16 @@ interface Props {
   onCerrar: () => void;
 }
 
-const ORIGEN = { punto: 'Consulta por punto', rectangulo: 'Consulta por rectángulo', lenguaje: 'Pregunta' };
+type Hablar = ReturnType<typeof useVoz>;
 
 export default function PanelResultados({ visor, estado, onCerrar }: Props) {
+  const voz = useVoz();
   return (
     <section className="entra panel flex max-h-full min-h-0 flex-col overflow-hidden" style={{ '--desde': '8px' } as React.CSSProperties} aria-live="polite">
       <header className="flex items-start gap-3 border-b border-[var(--linea)] py-4 pl-5 pr-3">
         <div className="min-w-0 flex-1">
-          <h2 className="line-clamp-2 text-[19px] font-semibold leading-tight tracking-[-0.02em]">{titulo(estado)}</h2>
-          <p className="mt-0.5 truncate text-[14px] text-[var(--tinta-3)]">{subtitulo(estado)}</p>
+          <h2 className="line-clamp-2 text-[19px] font-semibold leading-tight tracking-[-0.02em]">{titulo(estado, voz)}</h2>
+          <p className="mt-0.5 truncate text-[14px] text-[var(--tinta-3)]">{subtitulo(estado, voz)}</p>
         </div>
         <button
           type="button"
@@ -42,13 +46,13 @@ export default function PanelResultados({ visor, estado, onCerrar }: Props) {
       <div className="desplazable min-h-0 flex-1 overflow-y-auto">
         {estado.tipo === 'cargando' && (
           <div className="flex items-center gap-3 px-5 py-7 text-[15px] text-[var(--tinta-2)]">
-            <Spinner size="sm" /> Consultando GeoServer…
+            <Spinner size="sm" /> {voz('cargando')}
           </div>
         )}
         {estado.tipo === 'error' && (
           <div className="px-5 py-6 text-[15px] leading-relaxed">
             <p className="font-medium text-[var(--danger)]">{estado.mensaje}</p>
-            <p className="mt-2 text-[var(--tinta-2)]">Revisá que GeoServer esté levantado (docker compose up -d) y volvé a consultar.</p>
+            <p className="mt-2 text-[var(--tinta-2)]">{voz('errorAyuda')}</p>
           </div>
         )}
         {estado.tipo === 'medicion' && <Medida medicion={estado.medicion} />}
@@ -58,26 +62,39 @@ export default function PanelResultados({ visor, estado, onCerrar }: Props) {
   );
 }
 
-function titulo(estado: EstadoResultados) {
-  if (estado.tipo === 'medicion') return estado.medicion.tipo === 'distancia' ? 'Distancia' : 'Área';
-  if (estado.tipo === 'consulta' && estado.consulta.titulo) return estado.consulta.titulo;
-  if (estado.tipo === 'consulta' || estado.tipo === 'cargando') {
-    return ORIGEN[estado.tipo === 'consulta' ? estado.consulta.origen : estado.origen];
+const ORIGEN = { punto: 'origenPunto', rectangulo: 'origenRectangulo', lenguaje: 'origenLenguaje' } as const;
+
+function titulo(estado: EstadoResultados, voz: Hablar) {
+  if (estado.tipo === 'medicion') {
+    if (voz('capa') === 'tema') return estado.medicion.tipo === 'distancia' ? 'Qué tan lejos' : 'Qué tan grande';
+    return estado.medicion.tipo === 'distancia' ? 'Distancia' : 'Área';
   }
-  return 'Consulta';
+  // Las respuestas a preguntas dicen "la RN11": en el modo simple, "la ruta 11".
+  if (estado.tipo === 'consulta' && estado.consulta.titulo) {
+    if (voz('capa') !== 'tema') return estado.consulta.titulo;
+    return tituloSimple(estado.consulta.titulo, estado.consulta.capas);
+  }
+  if (estado.tipo === 'consulta' || estado.tipo === 'cargando') {
+    return voz(ORIGEN[estado.tipo === 'consulta' ? estado.consulta.origen : estado.origen]);
+  }
+  return voz('origenPunto');
 }
 
-function subtitulo(estado: EstadoResultados) {
-  if (estado.tipo === 'cargando') return 'Buscando entidades…';
+function subtitulo(estado: EstadoResultados, voz: Hablar) {
+  if (estado.tipo === 'cargando') return voz('buscando');
   if (estado.tipo === 'error') return 'No se pudo consultar';
-  if (estado.tipo === 'medicion') return estado.medicion.terminada ? 'Geodésica, sobre el elipsoide WGS 84' : 'Midiendo…';
+  if (estado.tipo === 'medicion') {
+    if (!estado.medicion.terminada) return 'Midiendo…';
+    return voz('capa') === 'tema' ? 'Medido sobre la forma real de la Tierra' : 'Geodésica, sobre el elipsoide WGS 84';
+  }
   const total = estado.consulta.capas.reduce((s, c) => s + c.total, 0);
-  if (!total) return 'Sin entidades en ese lugar';
+  if (!total) return voz('sinEntidades');
   const capas = estado.consulta.capas.length;
-  return `${total.toLocaleString('es-AR')} ${total === 1 ? 'entidad' : 'entidades'} en ${capas} ${capas === 1 ? 'capa' : 'capas'}`;
+  return `${total.toLocaleString('es-AR')} ${total === 1 ? voz('entidad') : voz('entidades')} en ${capas} ${capas === 1 ? voz('capa') : voz('capas')}`;
 }
 
 function Medida({ medicion }: { medicion: Medicion }) {
+  const voz = useVoz();
   const partes = medicion.texto.split(' ');
   return (
     <div className="px-5 pb-6 pt-5">
@@ -86,21 +103,46 @@ function Medida({ medicion }: { medicion: Medicion }) {
         <span className="text-[18px] font-medium text-[var(--tinta-2)]">{partes.at(-1)}</span>
       </div>
       <p className="mt-4 text-[14px] leading-relaxed text-[var(--tinta-2)]">
-        {medicion.terminada ? 'Hacé clic de nuevo en el mapa para empezar otra medición.' : 'Doble clic para terminar.'}
+        {voz('capa') === 'tema'
+          ? (medicion.terminada ? 'Tocá el mapa de nuevo para medir otra vez.' : 'Tocá dos veces para terminar.')
+          : (medicion.terminada ? 'Hacé clic de nuevo en el mapa para empezar otra medición.' : 'Doble clic para terminar.')}
       </p>
     </div>
   );
 }
 
 function Lista({ visor, consulta }: { visor: Visor; consulta: Consulta }) {
+  const voz = useVoz();
+  const simple = useInterfaz() === 'simple';
+  // Las cosas que se llaman igual en la lista ("Escuela Provincial" ×12) se distinguen por el pueblo más cercano.
+  const repetidas = useMemo(() => {
+    // Repetidas dentro de la misma capa: la provincia "Corrientes" no se confunde con la ciudad.
+    const nombrar = simple ? nombreSimple : nombrePro;
+    return consulta.capas.flatMap(c => {
+      const cuenta = new Map<string, number>();
+      for (const e of c.entidades) { const n = nombrar(e.atributos) ?? ''; cuenta.set(n, (cuenta.get(n) ?? 0) + 1); }
+      return c.entidades.filter(e => (cuenta.get(nombrar(e.atributos) ?? '') ?? 0) > 1);
+    });
+  }, [consulta, simple]);
+  const [ubicaciones, setUbicaciones] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    setUbicaciones(new Map());
+    if (!repetidas.length) return;
+    const control = new AbortController();
+    ubicarEntidades(repetidas, control.signal).then(setUbicaciones).catch(() => {});
+    return () => control.abort();
+  }, [repetidas]);
+
+  // En el modo simple, cada grupo se llama como en "¿Qué querés ver?" (Escuelas, no Educación).
+  if (simple) consulta = { ...consulta, capas: consulta.capas.map(c => ({ ...c, titulo: capaSimple(c.capa)?.titulo ?? c.titulo })) };
   if (!consulta.capas.length) {
     return (
       <p className="px-5 py-6 text-[15px] leading-relaxed text-[var(--tinta-2)]">
         {consulta.origen === 'punto'
-          ? 'Ninguna capa prendida tiene entidades en ese punto. Probá acercarte o prender otras capas.'
+          ? voz('vacioPunto')
           : consulta.origen === 'lenguaje'
             ? 'No hay resultados para esa pregunta. Probá con una distancia mayor u otro lugar.'
-            : 'Ninguna capa prendida tiene entidades dentro del rectángulo.'}
+            : voz('vacioRectangulo')}
       </p>
     );
   }
@@ -125,7 +167,7 @@ function Lista({ visor, consulta }: { visor: Visor; consulta: Consulta }) {
             </span>
           </div>
           <ul className="divide-y divide-[var(--linea)]">
-            {capa.entidades.map(entidad => <Fila key={entidad.id} visor={visor} entidad={entidad} />)}
+            {capa.entidades.map(entidad => <Fila key={entidad.id} visor={visor} entidad={entidad} donde={ubicaciones.get(entidad.id)} />)}
           </ul>
         </section>
       ))}
@@ -138,6 +180,8 @@ const VISIBLES = 4;
 // Resumen de la consulta por rectángulo: totales, cuántas entidades hay por capa y de qué tipo son
 // las de la capa con más resultados. Pasar el mouse por una barra las resalta en el mapa.
 function Resumen({ visor, consulta }: { visor: Visor; consulta: Consulta }) {
+  const simple = useInterfaz() === 'simple';
+  const voz = useVoz();
   const total = consulta.capas.reduce((s, c) => s + c.total, 0);
   const localidades = consulta.capas.find(c => c.capa === 'localidades');
   const habitantes = localidades && localidades.entidades.length === localidades.total
@@ -146,7 +190,9 @@ function Resumen({ visor, consulta }: { visor: Visor; consulta: Consulta }) {
   const mayor = [...consulta.capas].sort((a, b) => b.total - a.total)[0];
   const tipos = new Map<string, number>();
   for (const e of mayor.entidades) {
-    const tipo = e.atributos.find(([k]) => k === 'tipo')?.[1];
+    const original = e.atributos.find(([k]) => k === 'tipo')?.[1];
+    // En el modo simple, el tipo del IGN traducido ("Laguna que a veces se seca", no "Lago o Laguna Intermitente").
+    const tipo = original && (simple ? tipoSimple(original) : original);
     if (tipo) tipos.set(tipo, (tipos.get(tipo) ?? 0) + 1);
   }
   const resaltar = (capa: string | null) => {
@@ -157,11 +203,11 @@ function Resumen({ visor, consulta }: { visor: Visor; consulta: Consulta }) {
   return (
     <section className="border-b border-[var(--linea)] px-5 pb-5 pt-4">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(0,1fr))] gap-3">
-        <Cifra titulo="Entidades"><NumeroAnimado valor={total} /></Cifra>
-        <Cifra titulo="Capas"><NumeroAnimado valor={consulta.capas.length} /></Cifra>
-        {habitantes !== undefined && <Cifra titulo="Habitantes"><NumeroAnimado valor={habitantes} /></Cifra>}
+        <Cifra titulo={mayuscula(voz('entidades'))}><NumeroAnimado valor={total} /></Cifra>
+        <Cifra titulo={mayuscula(voz('capas'))}><NumeroAnimado valor={consulta.capas.length} /></Cifra>
+        {habitantes !== undefined && <Cifra titulo={simple ? 'Personas' : 'Habitantes'}><NumeroAnimado valor={habitantes} /></Cifra>}
       </div>
-      <h3 className="mb-3 mt-5 text-[13px] font-semibold text-[var(--tinta-3)]">Por capa</h3>
+      <h3 className="mb-3 mt-5 text-[13px] font-semibold text-[var(--tinta-3)]">Por {voz('capa')}</h3>
       <Barras
         datos={[...consulta.capas].sort((a, b) => b.total - a.total).map(c => ({ id: c.capa, etiqueta: c.titulo, valor: c.total }))}
         onApuntar={dato => resaltar(dato?.id ?? null)}
@@ -169,7 +215,7 @@ function Resumen({ visor, consulta }: { visor: Visor; consulta: Consulta }) {
       {tipos.size > 1 && (
         <>
           <h3 className="mb-3 mt-5 text-[13px] font-semibold text-[var(--tinta-3)]">
-            {mayor.titulo} por tipo{mayor.entidades.length < mayor.total ? ` (de las ${mayor.entidades.length} mostradas)` : ''}
+            {simple ? `${mayor.titulo}: qué hay` : `${mayor.titulo} por tipo`}{mayor.entidades.length < mayor.total ? ` (de ${simple ? 'los' : 'las'} ${mayor.entidades.length} ${simple ? 'que se ven' : 'mostradas'})` : ''}
           </h3>
           <Barras datos={[...tipos].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([tipo, n]) => ({ id: tipo, etiqueta: tipo, valor: n, color: 'var(--dato-2)' }))} />
         </>
@@ -189,8 +235,10 @@ function Cifra({ titulo, children }: { titulo: string; children: React.ReactNode
 
 // Lo más importante del lugar consultado, para entenderlo de un vistazo.
 function Ficha({ visor, entidad, capa }: { visor: Visor; entidad: Entidad; capa: string }) {
-  const nombre = nombreDe(entidad.atributos) ?? 'Sin nombre';
-  const datos = datosClave(entidad.atributos, 3);
+  const simple = useInterfaz() === 'simple';
+  const nombre = (simple ? nombreSimple(entidad.atributos) : nombrePro(entidad.atributos)) ?? 'Sin nombre';
+  const datos = simple ? datosSimples(entidad.atributos).slice(0, 4) : datosClave(entidad.atributos, 3);
+  const nombreCampo = simple ? rotuloSimple : rotulo;
   const encuadrar = () => volarA(visor, buffer(entidad.feature.getGeometry()!.getExtent(), 2500), { maxZoom: 13 });
   return (
     <section className="border-b border-[var(--linea)] px-5 pb-5 pt-4">
@@ -203,7 +251,7 @@ function Ficha({ visor, entidad, capa }: { visor: Visor; entidad: Entidad; capa:
         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3.5">
           {datos.map(([clave, valor]) => (
             <div key={clave} className={valor.length > 22 ? 'col-span-2' : ''}>
-              <dt className="text-[12px] font-medium text-[var(--tinta-3)]">{rotulo(clave)}</dt>
+              <dt className="text-[12px] font-medium text-[var(--tinta-3)]">{nombreCampo(clave)}</dt>
               <dd className={`mt-0.5 font-semibold leading-snug ${clave === 'canthab' ? 'text-[22px] tracking-[-0.02em]' : 'text-[15px]'}`}>{valor}</dd>
             </div>
           ))}
@@ -220,10 +268,13 @@ function Ficha({ visor, entidad, capa }: { visor: Visor; entidad: Entidad; capa:
   );
 }
 
-function Fila({ visor, entidad }: { visor: Visor; entidad: Entidad }) {
+function Fila({ visor, entidad, donde }: { visor: Visor; entidad: Entidad; donde?: string }) {
   const [abierta, setAbierta] = useState(false);
-  const nombre = nombreDe(entidad.atributos);
-  const atributos = entidad.atributos.filter(([, v]) => v !== nombre);
+  // En el modo simple, solo los datos que entiende cualquiera (sin "ver más" con los campos del IGN).
+  const simple = useInterfaz() === 'simple';
+  const nombre = simple ? nombreSimple(entidad.atributos) : nombrePro(entidad.atributos);
+  const atributos = simple ? datosSimples(entidad.atributos) : entidad.atributos.filter(([, v]) => v !== nombre && !/^sin nombre$/i.test(v));
+  const nombreCampo = simple ? rotuloSimple : rotulo;
   const mostrados = abierta ? atributos : atributos.slice(0, VISIBLES);
 
   const enfocar = () => {
@@ -240,11 +291,14 @@ function Fila({ visor, entidad }: { visor: Visor; entidad: Entidad }) {
       className="group px-5 py-3.5 transition-colors hover:bg-[var(--superficie-2)]"
     >
       <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 text-[16px] font-semibold leading-snug">{nombre ?? 'Sin nombre'}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[16px] font-semibold leading-snug">{nombre ?? 'Sin nombre'}</div>
+          {donde && <div className="truncate text-[13.5px] font-medium text-[var(--tinta-2)]">{donde}</div>}
+        </div>
         <button
           type="button"
           onClick={encuadrar}
-          aria-label={`Acercar a ${nombre ?? entidad.id}`}
+          aria-label={`Acercar a ${nombre ?? entidad.id}${donde ? `, ${donde.charAt(0).toLowerCase()}${donde.slice(1)}` : ''}`}
           title="Acercar"
           className="grid size-9 shrink-0 place-items-center rounded-lg text-[var(--tinta-3)] transition-colors hover:bg-[var(--superficie-3)] hover:text-[var(--tinta)]"
         >
@@ -255,7 +309,7 @@ function Fila({ visor, entidad }: { visor: Visor; entidad: Entidad }) {
         <dl className="mt-2 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1 text-[14px]">
           {mostrados.map(([clave, valor]) => (
             <div key={clave} className="contents">
-              <dt className="truncate text-[var(--tinta-3)]">{rotulo(clave)}</dt>
+              <dt className="truncate text-[var(--tinta-3)]">{nombreCampo(clave)}</dt>
               <dd className="truncate text-[var(--tinta)]" title={valor}>{valor}</dd>
             </div>
           ))}
@@ -274,3 +328,5 @@ function Fila({ visor, entidad }: { visor: Visor; entidad: Entidad }) {
     </li>
   );
 }
+
+const mayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);

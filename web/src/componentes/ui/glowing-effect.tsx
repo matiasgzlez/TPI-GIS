@@ -32,10 +32,26 @@ const GlowingEffect = memo(
     const containerRef = useRef<HTMLDivElement>(null);
     const lastPosition = useRef({ x: 0, y: 0 });
     const animationFrameRef = useRef<number>(0);
+    // Visor: el rectángulo se guarda y se vuelve a medir solo si cambia el tamaño, hay scroll o termina
+    // una animación. Medirlo en cada movimiento forzaba un layout por cuadro mientras se movía el mouse
+    // sobre el mapa (la barra de estado reescribe las coordenadas en cada movimiento).
+    const rectRef = useRef<DOMRect | null>(null);
+    const activeRef = useRef(false);
+    const medir = () => (rectRef.current ??= containerRef.current!.getBoundingClientRect());
+    const ponerActivo = (element: HTMLElement, activo: boolean) => {
+      if (activeRef.current === activo) return;
+      activeRef.current = activo;
+      element.style.setProperty("--active", activo ? "1" : "0");
+    };
 
     const handleMove = useCallback(
       (e?: MouseEvent | { x: number; y: number }) => {
         if (!containerRef.current) return;
+        // Lejos y ya apagado: no hay nada que hacer (el caso de casi todo movimiento sobre el mapa).
+        if (e && !activeRef.current && rectRef.current) {
+          const r = rectRef.current;
+          if (e.x < r.left - proximity || e.x > r.right + proximity || e.y < r.top - proximity || e.y > r.bottom + proximity) return;
+        }
 
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
@@ -45,7 +61,7 @@ const GlowingEffect = memo(
           const element = containerRef.current;
           if (!element) return;
 
-          const { left, top, width, height } = element.getBoundingClientRect();
+          const { left, top, width, height } = medir();
           const mouseX = e?.x ?? lastPosition.current.x;
           const mouseY = e?.y ?? lastPosition.current.y;
 
@@ -61,7 +77,7 @@ const GlowingEffect = memo(
           const inactiveRadius = 0.5 * Math.min(width, height) * inactiveZone;
 
           if (distanceFromCenter < inactiveRadius) {
-            element.style.setProperty("--active", "0");
+            ponerActivo(element, false);
             return;
           }
 
@@ -71,7 +87,7 @@ const GlowingEffect = memo(
             mouseY > top - proximity &&
             mouseY < top + height + proximity;
 
-          element.style.setProperty("--active", isActive ? "1" : "0");
+          ponerActivo(element, isActive);
 
           if (!isActive) return;
 
@@ -100,8 +116,14 @@ const GlowingEffect = memo(
     useEffect(() => {
       if (disabled) return;
 
-      const handleScroll = () => handleMove();
+      const invalidar = () => { rectRef.current = null; };
+      const handleScroll = () => { invalidar(); handleMove(); };
       const handlePointerMove = (e: PointerEvent) => handleMove(e);
+      const observador = new ResizeObserver(invalidar);
+      if (containerRef.current) observador.observe(containerRef.current);
+      window.addEventListener("resize", invalidar);
+      document.addEventListener("animationend", invalidar, true);
+      document.addEventListener("transitionend", invalidar, true);
 
       window.addEventListener("scroll", handleScroll, { passive: true });
       document.body.addEventListener("pointermove", handlePointerMove, {
@@ -112,6 +134,10 @@ const GlowingEffect = memo(
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
         }
+        observador.disconnect();
+        window.removeEventListener("resize", invalidar);
+        document.removeEventListener("animationend", invalidar, true);
+        document.removeEventListener("transitionend", invalidar, true);
         window.removeEventListener("scroll", handleScroll);
         document.body.removeEventListener("pointermove", handlePointerMove);
       };

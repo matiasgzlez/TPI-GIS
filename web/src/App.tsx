@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Toast, toast } from '@heroui/react';
-import { CornersOut, GearSix, Minus, Moon, Plus, Sun } from '@phosphor-icons/react';
+import { CornersOut, FilePdf, GearSix, ListBullets, Minus, Moon, Plus, Question, Stack, Sun, X } from '@phosphor-icons/react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
@@ -9,6 +10,13 @@ import { unByKey } from 'ol/Observable';
 import BarraEstado from './componentes/BarraEstado';
 import Buscador from './componentes/Buscador';
 import Dock from './componentes/Dock';
+import InterruptorModo from './componentes/InterruptorModo';
+import Acciones from './componentes/simple/Acciones';
+import PanelTemas from './componentes/simple/PanelTemas';
+import BarraHerramientas from './componentes/pro/BarraHerramientas';
+import Inspector, { type PestanaInspector } from './componentes/pro/Inspector';
+import LeyendaGeneral from './componentes/LeyendaGeneral';
+import { InterfazContexto, useInterfaz, hayDialogoModal, escribiendoEn, tituloSimple } from './interfaz';
 import EscudoRuta from './componentes/EscudoRuta';
 import Minimapa from './componentes/Minimapa';
 import PanelCapas from './componentes/PanelCapas';
@@ -24,16 +32,34 @@ import { guardarObra, type DatosObra } from './obras';
 import { useTema } from './tema';
 import { usePreferencias } from './preferencias';
 import { RESORTE_PANEL } from './movimiento';
-import { aplicarTema, cambiarCapas, crearVisor, dibujarRuta, ocultarRuta, refrescarMapa, restablecerCapas, verChaco, volarA, type Visor } from './visor';
+import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, crearVisor, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
+import { tituloProvincia } from './provincias';
+import type { Contenido } from './exportar/pdf';
 
 // Se cargan recién cuando hacen falta: el formulario trae Select, TextArea y el botón animado.
 const FormObra = lazy(() => import('./componentes/FormObra'));
 const PanelResultados = lazy(() => import('./componentes/PanelResultados'));
 const PanelConfiguracion = lazy(() => import('./componentes/PanelConfiguracion'));
 const TableroRuta = lazy(() => import('./componentes/TableroRuta'));
+const Bienvenida = lazy(() => import('./componentes/Bienvenida'));
+const Guia = lazy(() => import('./componentes/simple/Guia'));
+// Imprimir / exportar a PDF: jsPDF, pdf.js y la letra incrustada se cargan solo al abrirlo.
+const Imprimir = lazy(() => import('./exportar/Imprimir'));
 
 const retraso = (ms: number) => ({ '--retraso': `${ms}ms` }) as React.CSSProperties;
-const esCelular = () => !window.matchMedia('(min-width: 1024px)').matches;
+// Si la pantalla cumple una media query, atento a los cambios de tamaño.
+function useMedia(consultaCss: string) {
+  const [cumple, setCumple] = useState(() => window.matchMedia(consultaCss).matches);
+  useEffect(() => {
+    const consulta = window.matchMedia(consultaCss);
+    const cambio = () => setCumple(consulta.matches);
+    consulta.addEventListener('change', cambio);
+    return () => consulta.removeEventListener('change', cambio);
+  }, [consultaCss]);
+  return cumple;
+}
+// Celular o tablet chica: menos de 1024 px.
+const useCelular = () => useMedia('(max-width: 1023px)');
 
 // La ruta nacional del tablero: la RN11 en Chaco desde el botón, o cualquier otra con doble clic.
 interface EstadoRuta { cargando: boolean; activa: Ruta | null; tramos?: number }
@@ -49,10 +75,30 @@ export default function App() {
   // Cada pedido de ruta tiene un número: si llega uno nuevo (otro doble clic), el anterior se descarta.
   const pedidoRuta = useRef(0);
   const { oscuro, cambiar: cambiarTema } = useTema();
-  const { preferencias, cambiar: cambiarPreferencia } = usePreferencias();
+  const { preferencias, cambiar: cambiarPreferencia, factor } = usePreferencias();
   const [configuracion, setConfiguracion] = useState(false);
+  const [exportar, setExportar] = useState(false);
   const enVista = usePrediccion(visor);
   const [tablero, setTablero] = useState<{ ruta: Ruta; analisis?: AnalisisRuta; error?: string } | null>(null);
+  // Simple o profesional. Hasta elegir en la bienvenida, detrás se ve el simple.
+  const interfaz = preferencias.interfaz ?? 'simple';
+  const celular = useCelular();
+  const [guia, setGuia] = useState(false);
+  const [plegado, setPlegado] = useState(false);
+  const [pestana, setPestana] = useState<PestanaInspector>('informacion');
+  const [temasAbierto, setTemasAbierto] = useState(false);
+  const modal = !preferencias.interfaz || guia || exportar;
+  // Pro por debajo de 1440 px (la notebook de 1366): sin nada que mostrar, el inspector se pliega a un botón y le deja el lugar al mapa.
+  const anchoAmplio = useMedia('(min-width: 1440px)');
+  const hayContenido = !!(obra || resultados || tablero);
+  const inspectorPlegado = interfaz === 'pro' && !anchoAmplio && !hayContenido && pestana === 'informacion';
+
+  // El encuadre del mapa deja libres los bordes que tapa la interfaz a la vista.
+  useEffect(() => ponerDisposicion(interfaz, plegado, inspectorPlegado), [interfaz, plegado, inspectorPlegado]);
+  // En el profesional, un resultado nuevo o el tablero se muestran en "Información".
+  useEffect(() => {
+    if (resultados || tablero || obra) setPestana('informacion');
+  }, [resultados, tablero, obra]);
 
   // El mapa de OpenLayers se crea una sola vez; React maneja los paneles de alrededor.
   useEffect(() => {
@@ -60,29 +106,51 @@ export default function App() {
     setVisor(v);
     // Entrada: cuando el mapa terminó de dibujarse (o a los 1,8 s) hace un zoom hasta Chaco. El mapa no
     // se oculta mientras tanto: su fondo es el papel, y ocultarlo atrasaba el primer pintado ~700 ms.
-    // Un clic o la rueda saltean la entrada.
+    // Un clic o la rueda saltean la entrada, solo mientras dura: antes los escuchas quedaban puestos y el
+    // primer toque sobre el mapa, aunque fuera mucho después, devolvía la vista a Chaco.
     let inicio: ReturnType<typeof setTimeout> | undefined;
+    let fin: ReturnType<typeof setTimeout> | undefined;
     let arrancado = false;
+    const viewport = v.mapa.getViewport()!;
+    const terminar = () => {
+      viewport.removeEventListener('pointerdown', saltear);
+      viewport.removeEventListener('wheel', saltear);
+      // Marca que la entrada terminó: la batería de verificación (scripts/verificar) la espera antes de medir.
+      document.documentElement.dataset.entrada = 'lista';
+    };
     const arrancar = () => {
       if (arrancado) return;
       arrancado = true;
-      inicio = setTimeout(() => verChaco(v, 1600), 350);
+      inicio = setTimeout(() => {
+        verChaco(v, 1600);
+        fin = setTimeout(terminar, 1650);
+      }, 350);
     };
     v.mapa.once('rendercomplete', arrancar);
     const tope = setTimeout(arrancar, 1800);
-    const saltear = () => {
-      arrancar();
+    function saltear() {
+      terminar();
+      clearTimeout(tope);
       clearTimeout(inicio);
+      clearTimeout(fin);
+      arrancado = true;
       verChaco(v, 0);
-    };
-    v.mapa.getViewport()!.addEventListener('pointerdown', saltear, { once: true });
-    v.mapa.getViewport()!.addEventListener('wheel', saltear, { once: true, passive: true });
+    }
+    viewport.addEventListener('pointerdown', saltear);
+    viewport.addEventListener('wheel', saltear, { passive: true });
     return () => {
+      terminar();
       clearTimeout(inicio);
+      clearTimeout(fin);
       clearTimeout(tope);
       v.mapa.setTarget(undefined);
     };
   }, []);
+
+  // En la tele (factor de pantalla mayor a 1), rótulos y símbolos del mapa crecen con la interfaz.
+  useEffect(() => {
+    if (visor) aplicarFactor(visor, factor);
+  }, [visor, factor]);
 
   useEffect(() => {
     if (!visor) return;
@@ -94,12 +162,15 @@ export default function App() {
   // Si es una ruta nacional, el doble clic la elige y abre su tablero (en vez de acercar el mapa).
   const modoActual = useRef(modo);
   modoActual.current = modo;
+  const interfazActual = useRef(interfaz);
+  interfazActual.current = interfaz;
   const elegirRutaEn = useRef<(numero: string, coordenada: number[]) => void>(() => {});
   useEffect(() => {
     if (!visor) return;
     let bajoCursor: RutaBajoCursor | null = null;
     const quitarCartel = activarCartel(visor, {
       habilitado: () => modoActual.current === 'navegar' || modoActual.current === 'punto',
+      simple: () => interfazActual.current === 'simple',
       alCambiarRuta: r => { bajoCursor = r; },
     });
     const clave = visor.mapa.on('dblclick', e => {
@@ -135,13 +206,25 @@ export default function App() {
   // Atajos: 1–6 eligen herramienta y Esc vuelve a navegar. "/" y ⌘K los maneja el buscador.
   useEffect(() => {
     const alPresionar = (e: KeyboardEvent) => {
-      const escribiendo = e.target instanceof HTMLElement && e.target.closest('input, textarea, [role="listbox"], form');
+      // ⌘P / Ctrl+P: la impresión del visor (la hoja armada), no la de la página del navegador.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        if (!modal && !configuracion) setExportar(true);
+        return;
+      }
+      // Con la bienvenida, la guía o la Configuración abiertas (modales), los atajos no actúan sobre el visor de atrás.
+      if (modal || configuracion || hayDialogoModal()) return;
+      const escribiendo = escribiendoEn(e.target);
       if (e.key === 'Escape' && !escribiendo) {
+        setTemasAbierto(false);
+        setExportar(false);
         setModo('navegar');
         cerrarResultados();
         return;
       }
       if (escribiendo || e.metaKey || e.ctrlKey || e.altKey) return;
+      // "P": exportar a PDF (imprimir, en el modo simple).
+      if (e.key.toLowerCase() === 'p') { setExportar(true); return; }
       const elegido = (Object.keys(HERRAMIENTAS) as Modo[]).find(m => HERRAMIENTAS[m].tecla === e.key);
       if (elegido) setModo(elegido);
     };
@@ -161,7 +244,8 @@ export default function App() {
     try {
       const id = await guardarObra(obra!, datos);
       refrescarMapa(visor!);
-      toast.success('Obra guardada', { description: `GeoServer la registró como ${id}.` });
+      if (interfaz === 'simple') toast.success('¡Listo! Guardamos la obra', { description: 'Ya aparece en el mapa.' });
+      else toast.success('Obra guardada', { description: `GeoServer la registró como ${id}.` });
       // Deja ver el tilde del botón antes de cerrar la tarjeta.
       setTimeout(() => {
         setObra(null);
@@ -241,6 +325,7 @@ export default function App() {
     });
     analisis.puentes.forEach(p => p.feature.set('tipo_analisis', 'puente'));
     visor.analisis.addFeatures([...analisis.localidades.map(l => l.feature), ...analisis.puentes.map(p => p.feature)]);
+    callarRotulos(visor, 'localidades', true);
   }
 
   // Una pregunta en lenguaje natural: la consulta se resuelve en GeoServer, se resalta en el mapa y
@@ -287,7 +372,12 @@ export default function App() {
     } else if (tipo === 'lugar' && s.extension) {
       volarA(visor, s.extension, { maxZoom: 12, duracion: 1200 });
       visor.foco.clear();
-      visor.foco.addFeature(new Feature(new Point(getCenter(s.extension))));
+      // Con nombre y "elegida": la capa de foco le pone su etiqueta (con el tablero abierto el WMS calla
+      // los rótulos de localidades y el lugar quedaba sin nombre).
+      visor.foco.addFeature(new Feature({ geometry: new Point(getCenter(s.extension)), nombre: s.titulo, elegida: true }));
+    } else if (tipo === 'ruta') {
+      const [numero, provincia] = valor.split('|');
+      mostrarRuta({ numero, provincia });
     } else if (tipo === 'herramienta') {
       setModo(valor as Modo);
     } else if (tipo === 'capa') {
@@ -312,110 +402,321 @@ export default function App() {
     vista.animate({ zoom: vista.getZoom()! + delta, duration: 250 });
   };
 
+  // Lo que va en el panel de la derecha (flotante en simple y celular, inspector en pro). El formulario
+  // de una obra nueva tiene prioridad.
+  // Estable: la ventana de impresión la usa en su efecto de teclado.
+  const cerrarImprimir = useCallback(() => setExportar(false), []);
+
+  // Lo que el PDF suma después del mapa: la respuesta abierta o el tablero de la ruta.
+  // Memorizado: si fuera un objeto nuevo en cada render, la impresión volvería a pedir los pueblos
+  // cercanos con cada tecla (por ejemplo, al escribir los autores).
+  const contenidoPdf = useMemo<Contenido | null>(() => resultados?.tipo === 'consulta'
+    ? {
+      tipo: 'consulta',
+      consulta: resultados.consulta,
+      titulo: resultados.consulta.titulo
+        ? (interfaz === 'simple' ? tituloSimple(resultados.consulta.titulo, resultados.consulta.capas) : resultados.consulta.titulo)
+        : resultados.consulta.origen === 'punto' ? (interfaz === 'simple' ? 'Qué hay en este lugar' : 'Consulta por punto') : (interfaz === 'simple' ? 'Lo que hay en la zona' : 'Consulta por rectángulo'),
+    }
+    : resultados?.tipo === 'medicion' && resultados.medicion.terminada
+      ? { tipo: 'medicion', medicion: resultados.medicion, titulo: resultados.medicion.tipo === 'distancia' ? (interfaz === 'simple' ? 'Qué tan lejos' : 'Distancia medida') : (interfaz === 'simple' ? 'Qué tan grande' : 'Área medida') }
+      : tablero?.analisis
+        ? { tipo: 'tablero', analisis: tablero.analisis, titulo: `${interfaz === 'simple' ? 'La ruta' : 'Ruta Nacional'} ${tablero.ruta.numero} en ${tituloProvincia(tablero.ruta.provincia)}` }
+        : null, [resultados, tablero, interfaz]);
+
+  const contenidoPanel = !visor ? null : obra ? (
+    <Suspense fallback={null}>
+      <FormObra
+        visor={visor}
+        punto={obra}
+        guardando={guardando}
+        onGuardar={guardar}
+        onCancelar={() => {
+          setObra(null);
+          visor.dibujo.clear();
+        }}
+      />
+    </Suspense>
+  ) : resultados ? (
+    <Suspense fallback={null}>
+      <PanelResultados visor={visor} estado={resultados} onCerrar={cerrarResultados} />
+    </Suspense>
+  ) : tablero ? (
+    <Suspense fallback={null}>
+      <TableroRuta visor={visor} ruta={tablero.ruta} analisis={tablero.analisis} error={tablero.error} onCerrar={() => setTablero(null)} />
+    </Suspense>
+  ) : null;
+
+  const botonesTema = (compacto?: boolean) => (
+    <BotonRedondo etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={() => cambiarTema(!oscuro)} compacto={compacto}>
+      {oscuro ? <Sun size={compacto ? 20 : 21} weight="bold" /> : <Moon size={compacto ? 20 : 21} weight="bold" />}
+    </BotonRedondo>
+  );
+  const botonConfiguracion = (compacto?: boolean) => (
+    <BotonRedondo etiqueta="Configuración y ayuda" onPress={() => setConfiguracion(true)} compacto={compacto}>
+      <GearSix size={compacto ? 21 : 22} weight="bold" />
+    </BotonRedondo>
+  );
+  const interruptor = (
+    <div className="panel p-1">
+      <InterruptorModo valor={interfaz} onCambiar={v => cambiarPreferencia('interfaz', v)} className="w-[150px] bg-transparent max-lg:w-[124px]" />
+    </div>
+  );
+  const zoomBotones = (grande?: boolean) => (
+    <div className="panel pointer-events-auto flex flex-col p-1.5">
+      <BotonMapa etiqueta={grande ? 'Acercar el mapa' : 'Acercar'} onPress={() => zoom(1)} grande={grande}><Plus size={grande ? 24 : 20} /></BotonMapa>
+      <BotonMapa etiqueta={grande ? 'Alejar el mapa' : 'Alejar'} onPress={() => zoom(-1)} grande={grande}><Minus size={grande ? 24 : 20} /></BotonMapa>
+      <span className="mx-2.5 my-1 h-px bg-[var(--linea)]" />
+      <BotonMapa etiqueta={grande ? 'Ver todo el Chaco' : 'Ver Chaco completo'} onPress={() => verChaco(visor!)} grande={grande}><CornersOut size={grande ? 24 : 20} /></BotonMapa>
+    </div>
+  );
+  // Celular: escala, referencias (simple) e interruptor en una fila debajo del buscador, siempre a la
+  // vista (antes desaparecían al abrir un resultado o el tablero).
+  const filaCelular = (
+    <div className="pointer-events-none absolute inset-x-3 top-[76px] z-10 flex items-center gap-2">
+      <div className="entra pointer-events-auto" style={retraso(300)}><BarraEstado visor={visor!} compacta /></div>
+      {interfaz === 'simple' && <div className="entra pointer-events-auto" style={retraso(340)}><BotonReferencias visor={visor!} compacto /></div>}
+      <div className="entra pointer-events-auto ml-auto" style={retraso(380)}>{interruptor}</div>
+    </div>
+  );
+
+  // Panel flotante de la derecha (modo simple y celular).
+  const panelFlotante = (
+    <AnimatePresence>
+      {contenidoPanel && (
+        <motion.div
+          key={obra ? 'obra' : resultados ? 'resultados' : 'tablero'}
+          className={`pointer-events-none absolute right-4 top-[92px] z-10 flex w-[400px] flex-col max-lg:inset-x-3 max-lg:bottom-[110px] max-lg:top-auto max-lg:max-h-[46cqh] max-lg:w-auto ${interfaz === 'simple' ? 'bottom-[228px] max-lg:bottom-[118px]' : 'bottom-[184px]'}`}
+          initial={{ opacity: 0, x: 32, scale: 0.98 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: 32, scale: 0.98 }}
+          transition={RESORTE_PANEL}
+        >
+          <div className="pointer-events-auto flex min-h-0 flex-col">{contenidoPanel}</div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   return (
     <>
-      <div className="mapa" ref={destino} />
+      {/* Con la bienvenida o la guía abiertas, el resto queda inerte: el Tab no se escapa del diálogo. */}
+      <div className="mapa" ref={destino} inert={modal} />
 
       {visor && (
+        <InterfazContexto.Provider value={interfaz}>
         <MotionConfig reducedMotion={preferencias.movimientoReducido ? 'always' : 'user'}>
-        <div className="interfaz">
-          {/* Arriba: marca, buscador al centro, RN11, tema y configuración. */}
-          <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-3 lg:inset-x-4 lg:top-4">
-            <div className="entra pointer-events-auto max-xl:hidden" style={retraso(100)}>
-              <Marca />
-            </div>
-            <div className="entra pointer-events-auto mx-auto w-full lg:absolute lg:left-[356px] lg:w-[calc(100cqw-356px-452px)] xl:left-1/2 xl:w-[clamp(420px,calc(100cqw-880px),600px)] xl:-translate-x-1/2" style={retraso(180)}>
-              <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
-            </div>
-            <div className="entra pointer-events-auto ml-auto flex items-center gap-2.5 max-lg:hidden" style={retraso(260)}>
-              <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} />
-              <BotonRedondo etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={() => cambiarTema(!oscuro)}>
-                {oscuro ? <Sun size={21} weight="bold" /> : <Moon size={21} weight="bold" />}
-              </BotonRedondo>
-              <BotonRedondo etiqueta="Configuración y ayuda" onPress={() => setConfiguracion(true)}>
-                <GearSix size={22} weight="bold" />
-              </BotonRedondo>
-            </div>
-          </header>
-
-          {/* Izquierda: capas y escala. */}
-          <aside className="pointer-events-none absolute bottom-4 left-4 top-4 z-10 xl:top-[92px] flex w-[340px] flex-col gap-3 max-lg:bottom-auto max-lg:left-3 max-lg:right-3 max-lg:top-[84px] max-lg:max-h-[52vh] max-lg:w-auto">
-            <div className="entra pointer-events-auto flex min-h-0 flex-1 flex-col" style={retraso(220)}>
-              <PanelCapas visor={visor} plegable={esCelular()} />
-            </div>
-            <div className="entra pointer-events-auto max-lg:hidden" style={retraso(420)}>
-              <BarraEstado visor={visor} />
-            </div>
-          </aside>
-
-          {/* Derecha: resultados de consultas y mediciones. */}
-          <AnimatePresence>
-            {!resultados && tablero && (
-              <motion.div
-                key="tablero"
-                className="pointer-events-none absolute bottom-[184px] right-4 top-[92px] z-10 flex w-[400px] flex-col max-lg:inset-x-3 max-lg:bottom-[110px] max-lg:top-auto max-lg:max-h-[46cqh] max-lg:w-auto"
-                initial={{ opacity: 0, x: 32, scale: 0.98 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: 32, scale: 0.98 }}
-                transition={RESORTE_PANEL}
-              >
-                <div className="pointer-events-auto flex min-h-0 flex-col">
-                  <Suspense fallback={null}>
-                    <TableroRuta visor={visor} ruta={tablero.ruta} analisis={tablero.analisis} error={tablero.error} onCerrar={() => setTablero(null)} />
-                  </Suspense>
+        <div className="interfaz" data-interfaz={interfaz} inert={modal}>
+          {interfaz === 'simple' ? (
+            <>
+              {/* Simple: buscador grande arriba, "¿Qué querés ver?" a la izquierda, botones grandes abajo. */}
+              {/* Cabecera en fila: un espacio del ancho del panel de temas, el buscador en el lugar libre y
+                  los botones a la derecha; nada se pisa a ningún ancho. */}
+              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-3 lg:inset-x-4 lg:top-4">
+                <div className="w-[340px] shrink-0 max-lg:hidden xl:w-[384px]" />
+                <div className="entra pointer-events-auto mx-auto w-full min-w-0 lg:max-w-[620px] lg:flex-1" style={retraso(120)} data-guia="buscar">
+                  <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
                 </div>
-              </motion.div>
-            )}
-            {resultados && (
-              <motion.div
-                key="resultados"
-                className="pointer-events-none absolute bottom-[184px] right-4 top-[92px] z-10 flex w-[400px] flex-col max-lg:inset-x-3 max-lg:bottom-[110px] max-lg:top-auto max-lg:max-h-[46cqh] max-lg:w-auto"
-                initial={{ opacity: 0, x: 32, scale: 0.98 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: 32, scale: 0.98 }}
-                transition={RESORTE_PANEL}
-              >
-                <div className="pointer-events-auto flex min-h-0 flex-col">
-                  <Suspense fallback={null}>
-                    <PanelResultados visor={visor} estado={resultados} onCerrar={cerrarResultados} />
-                  </Suspense>
+                <div className="entra pointer-events-auto flex shrink-0 items-center gap-2.5 max-lg:hidden" style={retraso(200)}>
+                  <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} angosto />
+                  {interruptor}
+                  <BotonRedondo etiqueta="Ayuda: cómo se usa" onPress={() => setGuia(true)}><Question size={22} weight="bold" /></BotonRedondo>
+                  <div className="max-xl:hidden">{botonesTema()}</div>
+                  {botonConfiguracion()}
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              </header>
 
-          {/* Abajo: herramientas al centro; zoom y minimapa a la derecha. */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center max-lg:bottom-3 lg:left-[356px] lg:right-[230px] xl:left-0 xl:right-0">
-            <div className="entra pointer-events-auto" style={retraso(340)}>
-              <Dock modo={modo} onModo={setModo} />
-            </div>
-          </div>
-          <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex items-end gap-3 max-lg:hidden">
-            <div className="entra panel pointer-events-auto flex flex-col p-1.5" style={retraso(460)}>
-              <BotonMapa etiqueta="Acercar" onPress={() => zoom(1)}><Plus size={20} /></BotonMapa>
-              <BotonMapa etiqueta="Alejar" onPress={() => zoom(-1)}><Minus size={20} /></BotonMapa>
-              <span className="mx-2.5 my-1 h-px bg-[var(--linea)]" />
-              <BotonMapa etiqueta="Ver Chaco completo" onPress={() => verChaco(visor)}><CornersOut size={20} /></BotonMapa>
-            </div>
-            {preferencias.minimapa && (
-              <div className="entra pointer-events-auto" style={retraso(520)}>
-                <Minimapa visor={visor} />
+              {!celular && (
+                <aside className="pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex w-[340px] flex-col gap-3 xl:w-[384px]">
+                  <div className="entra pointer-events-auto flex min-h-0 flex-1 flex-col" style={retraso(180)} data-guia="temas">
+                    <PanelTemas visor={visor} />
+                  </div>
+                  {/* Sin animación de entrada: en la tele, la escala y "Referencias" eran el LCP y la
+                      animación lo atrasaba (igual que la barra de estado de pro). */}
+                  <div className="pointer-events-auto flex items-center gap-2">
+                    <BarraEstado visor={visor} compacta />
+                    <BotonReferencias visor={visor} />
+                  </div>
+                </aside>
+              )}
+
+              {panelFlotante}
+
+              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center max-lg:bottom-3 lg:left-[360px] lg:right-[96px] xl:left-[404px] 2xl:left-0 2xl:right-0">
+                <div className="entra pointer-events-auto" style={retraso(260)}>
+                  <Acciones modo={modo} onModo={setModo} sinPista={!!obra || exportar} imprimiendo={exportar} onImprimir={() => setExportar(e => !e)} />
+                </div>
               </div>
-            )}
-          </div>
+              {!celular && (
+                <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex items-end gap-3">
+                  {preferencias.minimapa && <div className="entra pointer-events-auto max-xl:hidden" style={retraso(440)}><Minimapa visor={visor} /></div>}
+                  <div className="entra" style={retraso(380)}>{zoomBotones(true)}</div>
+                </div>
+              )}
 
-          {/* Celular: RN11, tema y configuración arriba del dock (se ocultan mientras hay un panel abierto). */}
-          <div className={`pointer-events-none absolute bottom-[100px] right-3 z-10 transition-opacity duration-300 lg:hidden ${resultados || tablero ? 'invisible opacity-0' : ''}`}>
-            <div className="pointer-events-auto flex gap-2">
-              <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} />
-              <BotonRedondo etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={() => cambiarTema(!oscuro)} compacto>
-                {oscuro ? <Sun size={20} weight="bold" /> : <Moon size={20} weight="bold" />}
-              </BotonRedondo>
-              <BotonRedondo etiqueta="Configuración y ayuda" onPress={() => setConfiguracion(true)} compacto>
-                <GearSix size={21} weight="bold" />
-              </BotonRedondo>
-            </div>
-          </div>
+              {celular && (
+                <>
+                  {/* Celular: escala, "¿Qué querés ver?" y los ajustes arriba de los botones grandes. */}
+                  {filaCelular}
+                  <div className={`pointer-events-none absolute bottom-[112px] inset-x-3 z-10 flex items-end gap-2 transition-opacity duration-300 ${contenidoPanel || temasAbierto ? 'invisible opacity-0' : ''}`}>
+                    <div className="pointer-events-auto flex w-full flex-col gap-2">
+                      <div className="flex gap-2">
+                        <button type="button" data-guia="temas" onClick={() => setTemasAbierto(true)} className="panel flex h-12 min-w-0 flex-1 items-center justify-center gap-2 px-3 text-[16px] font-semibold">
+                          <Stack size={20} weight="fill" className="shrink-0" /> <span className="truncate">¿Qué querés ver?</span>
+                        </button>
+                        <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} soloEscudo />
+                        <BotonRedondo etiqueta="Ayuda: cómo se usa" onPress={() => setGuia(true)} compacto><Question size={20} weight="bold" /></BotonRedondo>
+                        {botonConfiguracion(true)}
+                      </div>
+                    </div>
+                  </div>
+                  <AnimatePresence>
+                    {temasAbierto && (
+                      <motion.div
+                        className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 flex max-h-[78cqh] flex-col"
+                        initial={{ y: '100%' }}
+                        animate={{ y: 0 }}
+                        exit={{ y: '100%' }}
+                        transition={RESORTE_PANEL}
+                      >
+                        <button type="button" onClick={() => setTemasAbierto(false)} className="panel mx-auto mb-2 flex h-11 items-center gap-2 px-5 text-[15px] font-semibold">
+                          <X size={16} weight="bold" /> Ver el mapa
+                        </button>
+                        <PanelTemas visor={visor} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              )}
+            </>
+          ) : !celular ? (
+            <>
+              {/* Pro: barra arriba, capas a la izquierda, inspector a la derecha y estado abajo. */}
+              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-center gap-2.5">
+                <div className="entra pointer-events-auto max-xl:hidden" style={retraso(80)}><Marca angosta /></div>
+                <div className="entra pointer-events-auto min-w-[240px] flex-1" style={retraso(140)}>
+                  <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
+                </div>
+                <div className="entra pointer-events-auto" style={retraso(200)}><BarraHerramientas modo={modo} onModo={setModo} /></div>
+                <div className="entra pointer-events-auto flex items-center gap-2" style={retraso(260)}>
+                  <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} angosto />
+                  <BotonRedondo etiqueta="Exportar a PDF" onPress={() => setExportar(e => !e)} compacto><FilePdf size={21} weight="bold" /></BotonRedondo>
+                  {interruptor}
+                  {botonesTema(true)}
+                  {botonConfiguracion(true)}
+                </div>
+              </header>
+
+              <aside className="pointer-events-none absolute bottom-[68px] left-3 top-[84px] z-10 flex w-[316px] flex-col">
+                <AnimatePresence initial={false} mode="popLayout">
+                  {plegado ? (
+                    <motion.button
+                      key="riel"
+                      type="button"
+                      onClick={() => setPlegado(false)}
+                      initial={{ opacity: 0, x: -12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -12 }}
+                      transition={RESORTE_PANEL}
+                      className="panel pointer-events-auto flex w-14 flex-col items-center gap-2 py-4 text-[13px] font-semibold"
+                      aria-label={`Mostrar capas (${visor.visibles.size} prendidas)`}
+                    >
+                      <Stack size={22} />
+                      <span className="[writing-mode:vertical-rl]">Capas · <ContadorCapas visor={visor} solo /></span>
+                    </motion.button>
+                  ) : (
+                    <motion.div
+                      key="lateral"
+                      className="entra pointer-events-auto flex min-h-0 flex-1 flex-col"
+                      style={retraso(180)}
+                      initial={{ opacity: 0, x: -16 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -16 }}
+                      transition={RESORTE_PANEL}
+                    >
+                      <PanelCapas visor={visor} plegable={false} onPlegar={() => setPlegado(true)} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </aside>
+
+              {inspectorPlegado ? (
+                <button
+                  type="button"
+                  onClick={() => setPestana('leyenda')}
+                  className="entra panel pointer-events-auto absolute right-3 top-[84px] z-10 flex h-11 items-center gap-2 px-4 text-[14px] font-semibold"
+                  style={retraso(240)}
+                >
+                  <ListBullets size={17} weight="bold" /> Leyenda
+                </button>
+              ) : (
+                <aside className="entra pointer-events-none absolute bottom-[68px] right-3 top-[84px] z-10 flex w-[392px] flex-col" style={retraso(240)}>
+                  <div className="pointer-events-auto flex min-h-0 flex-1 flex-col">
+                    <Inspector visor={visor} pestana={pestana} onPestana={setPestana} contenido={contenidoPanel} />
+                  </div>
+                </aside>
+              )}
+
+              {/* Indicación de la herramienta activa, arriba del mapa. */}
+              <AnimatePresence>
+                {modo !== 'navegar' && !obra && (
+                  <motion.p
+                    key={modo}
+                    className="panel pointer-events-none absolute left-1/2 top-[84px] z-10 -translate-x-1/2 px-4 py-2 text-[14px] font-medium text-[var(--tinta-2)]"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={RESORTE_PANEL}
+                  >
+                    {HERRAMIENTAS[modo].ayuda}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              <div className={`pointer-events-none absolute bottom-[68px] z-10 flex items-end gap-3 ${inspectorPlegado ? 'right-3' : 'right-[408px]'}`}>
+                <div className="entra" style={retraso(420)}>{zoomBotones()}</div>
+                {preferencias.minimapa && <div className="entra pointer-events-auto" style={retraso(480)}><Minimapa visor={visor} /></div>}
+              </div>
+
+              {/* Sin animación de entrada: es lo que el navegador toma como LCP y la demora lo empeoraba. */}
+              <footer className="pointer-events-auto absolute inset-x-3 bottom-3 z-10">
+                <BarraEstado visor={visor} fila>
+                  <span className="h-5 w-px bg-[var(--linea)]" />
+                  <ContadorCapas visor={visor} />
+                </BarraEstado>
+              </footer>
+            </>
+          ) : (
+            <>
+              {/* Pro en celular: la disposición flotante (el profesional pide pantalla grande). */}
+              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-3">
+                <div className="entra pointer-events-auto mx-auto w-full" style={retraso(180)}>
+                  <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
+                </div>
+              </header>
+              {filaCelular}
+              <aside className="pointer-events-none absolute left-3 right-3 top-[134px] z-10 flex max-h-[48vh] flex-col gap-3">
+                <div className="entra pointer-events-auto flex min-h-0 flex-1 flex-col" style={retraso(220)}>
+                  <PanelCapas visor={visor} plegable />
+                </div>
+              </aside>
+              {panelFlotante}
+              <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+                <div className="entra pointer-events-auto" style={retraso(340)}>
+                  <Dock modo={modo} onModo={setModo} />
+                </div>
+              </div>
+              <div className={`pointer-events-none absolute bottom-[100px] right-3 z-10 transition-opacity duration-300 ${contenidoPanel ? 'invisible opacity-0' : ''}`}>
+                <div className="pointer-events-auto flex flex-col items-end gap-2">
+                  <div className="flex gap-2">
+                    <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} />
+                    {botonesTema(true)}
+                    {botonConfiguracion(true)}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
           <AnimatePresence>
             {configuracion && (
@@ -432,21 +733,47 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-          {obra && (
-            <Suspense fallback={null}>
-              <FormObra
-                visor={visor}
-                punto={obra}
-                guardando={guardando}
-                onGuardar={guardar}
-                onCancelar={() => {
-                  setObra(null);
-                  visor.dibujo.clear();
-                }}
-              />
-            </Suspense>
+
+          <AnimatePresence>
+            {!preferencias.interfaz && (
+              <Suspense fallback={null}>
+                <Bienvenida
+                  onElegir={v => {
+                    cambiarPreferencia('interfaz', v);
+                    if (v === 'simple' && !preferencias.guiaVista) setTimeout(() => setGuia(true), 700);
+                    // Si no viene la guía, el foco queda en el modo recién elegido (y no en el body).
+                    else setTimeout(() => [...document.querySelectorAll<HTMLElement>('[aria-label="Tipo de pantalla"] [aria-checked="true"]')]
+                      .find(el => el.getClientRects().length > 0)?.focus(), 80);
+                  }}
+                />
+              </Suspense>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {exportar && visor && (
+              <Suspense fallback={null}>
+                <Imprimir
+                  visor={visor}
+                  contenido={contenidoPdf}
+                  panelAbierto={hayContenido}
+                  ruta={ruta.activa ? { numero: ruta.activa.numero, nombre: `${interfaz === 'simple' ? 'La ruta' : 'RN'}${interfaz === 'simple' ? ' ' : ''}${ruta.activa.numero} en ${tituloProvincia(ruta.activa.provincia)}` } : null}
+                  autores={preferencias.autores}
+                  onAutores={v => cambiarPreferencia('autores', v)}
+                  onCerrar={cerrarImprimir}
+                />
+              </Suspense>
+            )}
+          </AnimatePresence>
+          {guia && interfaz === 'simple' && (
+            <Guia
+              onTerminar={() => {
+                setGuia(false);
+                cambiarPreferencia('guiaVista', true);
+              }}
+            />
           )}
         </MotionConfig>
+        </InterfazContexto.Provider>
       )}
 
       <Toast.Provider placement="top end" />
@@ -454,9 +781,9 @@ export default function App() {
   );
 }
 
-function Marca() {
+function Marca({ angosta }: { angosta?: boolean }) {
   return (
-    <div className="panel flex h-[60px] w-[340px] items-center gap-3 px-4">
+    <div className={`panel flex h-[60px] items-center gap-3 px-4 ${angosta ? 'w-[316px]' : 'w-[340px]'}`}>
       <EscudoRuta className="h-9 w-auto shrink-0" />
       <div className="min-w-0">
         <h1 className="text-[18px] font-semibold leading-tight tracking-[-0.02em]">Visor SIG · RN11 Chaco</h1>
@@ -467,23 +794,42 @@ function Marca() {
 }
 
 // Sin ruta a la vista abre la RN11; con una ruta elegida (la RN11 u otra por doble clic) la oculta.
-function BotonRuta({ estado, onPress }: { estado: EstadoRuta; onPress: () => void }) {
+function BotonRuta({ estado, onPress, angosto, soloEscudo }: { estado: EstadoRuta; onPress: () => void; angosto?: boolean; soloEscudo?: boolean }) {
   const activa = estado.activa;
+  const simple = useInterfaz() === 'simple';
+  if (soloEscudo) {
+    return (
+      <button
+        type="button"
+        onClick={onPress}
+        aria-pressed={!!activa}
+        aria-label={activa ? `Ocultar la ruta ${activa.numero}` : 'Ver la ruta 11'}
+        className={`panel grid size-12 shrink-0 place-items-center transition-colors ${activa ? '!bg-[var(--vial-fuerte)]' : ''}`}
+        style={activa ? ({ '--escudo-fondo': 'var(--vial-fuerte)', '--escudo-tinta': '#fff' } as React.CSSProperties) : undefined}
+      >
+        <EscudoRuta numero={activa?.numero ?? '11'} className={`h-7 w-auto ${estado.cargando ? 'animate-pulse' : ''}`} />
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       onClick={onPress}
       aria-pressed={!!activa}
-      className={`panel flex h-[60px] w-[200px] items-center gap-3 pl-3.5 pr-4 text-left max-lg:w-auto transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 max-lg:h-12 max-lg:pr-3.5 ${
-        activa ? '!bg-[var(--vial)] text-white' : 'hover:bg-[var(--superficie-2)]'
+      className={`panel flex h-[60px] items-center gap-3 pl-3.5 pr-4 text-left max-lg:w-auto transition-colors ${angosto ? 'w-auto' : 'w-[200px]'} duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 max-lg:h-12 max-lg:pr-3.5 ${
+        activa ? '!bg-[var(--vial-fuerte)] text-white' : 'hover:bg-[var(--superficie-2)]'
       }`}
-      style={activa ? ({ '--escudo-fondo': 'var(--vial)', '--escudo-tinta': '#fff' } as React.CSSProperties) : undefined}
+      style={activa ? ({ '--escudo-fondo': 'var(--vial-fuerte)', '--escudo-tinta': '#fff' } as React.CSSProperties) : undefined}
     >
+      {/* En pro, desde 1780 px útiles (la tele) la barra muestra los nombres de las herramientas: el botón
+          pierde el subtítulo para dejarle lugar al buscador. */}
       <EscudoRuta numero={activa?.numero ?? '11'} className={`h-8 w-auto max-lg:h-7 ${estado.cargando ? 'animate-pulse' : ''}`} />
       <span className="flex min-w-0 flex-col">
-        <span className="text-[15px] font-semibold leading-tight">{activa ? `Ocultar RN${activa.numero}` : 'Ver RN11'}</span>
-        <span className={`truncate text-[13px] leading-tight max-lg:hidden ${activa ? 'text-white/85' : 'text-[var(--tinta-3)]'}`}>
-          {estado.cargando ? 'Cargando traza…' : activa ? `${estado.tramos} tramos en ${activa.provincia}` : 'Traza en Chaco'}
+        <span className="text-[15px] font-semibold leading-tight">{simple ? (activa ? `Ocultar la ruta ${activa.numero}` : 'Ver la ruta 11') : activa ? `Ocultar RN${activa.numero}` : 'Ver RN11'}</span>
+        <span className={`truncate text-[13px] leading-tight max-lg:hidden ${angosto ? 'max-2xl:hidden' : ''} ${angosto && !simple ? '@min-[1780px]:hidden' : ''} ${activa ? 'text-white' : 'text-[var(--tinta-3)]'}`}>
+          {estado.cargando ? (simple ? 'Cargando…' : 'Cargando traza…')
+            : activa ? (simple ? `En ${tituloProvincia(activa.provincia)}` : `${estado.tramos} tramos en ${tituloProvincia(activa.provincia)}`)
+              : simple ? 'En el Chaco' : 'Traza en Chaco'}
         </span>
       </span>
     </button>
@@ -504,17 +850,99 @@ function BotonRedondo({ etiqueta, onPress, compacto, children }: { etiqueta: str
   );
 }
 
-function BotonMapa({ etiqueta, onPress, children }: { etiqueta: string; onPress: () => void; children: React.ReactNode }) {
+function BotonMapa({ etiqueta, onPress, grande, children }: { etiqueta: string; onPress: () => void; grande?: boolean; children: React.ReactNode }) {
   return (
     <button
       type="button"
       aria-label={etiqueta}
       title={etiqueta}
       onClick={onPress}
-      className="grid size-11 place-items-center rounded-xl text-[var(--tinta-2)] transition-colors hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2"
+      className={`grid place-items-center rounded-xl text-[var(--tinta-2)] transition-colors hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2 ${grande ? 'size-14' : 'size-11'}`}
     >
       {children}
     </button>
+  );
+}
+
+// Capas prendidas, al día (la barra de estado no se redibujaba al prender o apagar).
+function ContadorCapas({ visor, solo }: { visor: Visor; solo?: boolean }) {
+  const [, redibujar] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => suscribirCapas(visor, redibujar), [visor]);
+  if (solo) return <>{visor.visibles.size}</>;
+  return <span className="text-[var(--tinta-3)]"><strong className="font-semibold text-[var(--tinta)]">{visor.visibles.size}</strong> de 48 capas</span>;
+}
+
+// Modo simple: "Referencias" abre qué significa cada color de lo que se está viendo (la leyenda).
+// `compacto`: en el celular, más chico y se abre hacia abajo (va en la fila de arriba).
+function BotonReferencias({ visor, compacto }: { visor: Visor; compacto?: boolean }) {
+  const [abierto, setAbierto] = useState(false);
+  const boton = useRef<HTMLButtonElement>(null);
+  // Escape cierra las referencias (antes que cualquier otro Escape del visor) y devuelve el foco al botón.
+  useEffect(() => {
+    if (!abierto) return;
+    const alPresionar = (e: KeyboardEvent) => {
+      // Con un diálogo modal encima (la guía), el Escape es del diálogo.
+      if (e.key !== 'Escape' || hayDialogoModal()) return;
+      e.stopPropagation();
+      setAbierto(false);
+      boton.current?.focus();
+    };
+    window.addEventListener('keydown', alPresionar, true);
+    return () => window.removeEventListener('keydown', alPresionar, true);
+  }, [abierto]);
+  return (
+    <div className="relative">
+      <button
+        ref={boton}
+        type="button"
+        onClick={() => setAbierto(!abierto)}
+        aria-expanded={abierto}
+        aria-label={compacto ? 'Referencias' : undefined}
+        title="Referencias: qué significa cada color"
+        className={`panel flex items-center gap-2 font-semibold hover:bg-[var(--superficie-2)] ${compacto ? 'size-[42px] justify-center' : 'h-[46px] px-4 text-[15px]'}`}
+      >
+        <ListBullets size={18} weight="bold" /> {!compacto && 'Referencias'}
+      </button>
+      {/* En el celular va en un portal: la animación de entrada del contenedor (transform) atrapaba el
+          position: fixed y el panel salía angosto y corrido. */}
+      {compacto ? createPortal(<div className="interfaz-portal"><AnimatePresence>
+        {abierto && (
+          <motion.section
+            aria-label="Referencias: qué significa cada color"
+            className={`panel desplazable max-h-[60cqh] overflow-y-auto shadow-[var(--sombra-alta)] ${compacto ? 'fixed inset-x-3 top-[124px] z-40' : 'absolute bottom-[56px] left-0 w-[360px]'}`}
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={RESORTE_PANEL}
+          >
+            <header className="flex items-center justify-between border-b border-[var(--linea)] py-3 pl-5 pr-2">
+              <h2 className="text-[18px] font-semibold">Qué significa cada color</h2>
+              <button type="button" onClick={() => setAbierto(false)} aria-label="Cerrar referencias" className="grid size-10 place-items-center rounded-xl hover:bg-[var(--superficie-2)]"><X size={18} /></button>
+            </header>
+            <LeyendaGeneral visor={visor} />
+          </motion.section>
+        )}
+      </AnimatePresence></div>, document.body) : (
+      <AnimatePresence>
+        {abierto && (
+          <motion.section
+            aria-label="Referencias: qué significa cada color"
+            className={`panel desplazable max-h-[60cqh] overflow-y-auto shadow-[var(--sombra-alta)] ${compacto ? 'fixed inset-x-3 top-[124px] z-40' : 'absolute bottom-[56px] left-0 w-[360px]'}`}
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={RESORTE_PANEL}
+          >
+            <header className="flex items-center justify-between border-b border-[var(--linea)] py-3 pl-5 pr-2">
+              <h2 className="text-[18px] font-semibold">Qué significa cada color</h2>
+              <button type="button" onClick={() => setAbierto(false)} aria-label="Cerrar referencias" className="grid size-10 place-items-center rounded-xl hover:bg-[var(--superficie-2)]"><X size={18} /></button>
+            </header>
+            <LeyendaGeneral visor={visor} />
+          </motion.section>
+        )}
+      </AnimatePresence>
+      )}
+    </div>
   );
 }
 

@@ -4,11 +4,16 @@ import { Binoculars, MagnifyingGlass, X, ClockCounterClockwise, Sparkle, ChatCir
 import GeoJSON from 'ol/format/GeoJSON';
 import { buffer } from 'ol/extent';
 import { URL_WFS, WORKSPACE } from '../config';
-import { borrarHistorial, buscar, DESTACADAS, guardarEnHistorial, leerHistorial, normalizar, type Sugerencia } from '../comandos';
+import { borrarHistorial, buscar, DESTACADAS, guardarEnHistorial, leerHistorial, normalizar, paraModoSimple, SECCIONES_SIMPLES, type Sugerencia } from '../comandos';
 import { cargarAprendizaje } from '../aprendizaje';
 import { claveDe, describir, interpretar, masConsultadas, sugerir, type Interpretacion } from '../lenguaje';
 import type { Modo } from '../herramientas';
 import EscudoRuta from './EscudoRuta';
+import { useInterfaz, hayDialogoModal, escribiendoEn } from '../interfaz';
+import { CAPITALES, tituloProvincia } from '../provincias';
+
+const esCapital = (nombre: string, provincia: string) =>
+  CAPITALES.some(c => normalizar(c.nombre) === normalizar(nombre) && normalizar(tituloProvincia(c.provincia)) === normalizar(provincia));
 import { ICONOS_ACCION, ICONOS_HERRAMIENTA, IconoCapa, IconoLugar } from './iconos';
 import { GlowingEffect } from './ui/glowing-effect';
 
@@ -28,6 +33,9 @@ interface Props {
 // Buscador central: con el campo vacío ofrece el historial y sugerencias; al escribir, acciones,
 // herramientas, capas y lugares (WFS sobre localidades, sin servicios externos).
 export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
+  const simple = useInterfaz() === 'simple';
+  // El texto guía se elige por el ancho real del campo (no por el de la pantalla): así nunca queda cortado.
+  const [anchoCampo, setAnchoCampo] = useState(0);
   const [texto, setTexto] = useState('');
   const [abierto, setAbierto] = useState(false);
   const [activo, setActivo] = useState(0);
@@ -35,6 +43,12 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
   const [buscandoLugares, setBuscandoLugares] = useState(false);
   const [historial, setHistorial] = useState(leerHistorial);
   const entrada = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!entrada.current) return;
+    const observador = new ResizeObserver(([medida]) => setAnchoCampo(medida.contentRect.width));
+    observador.observe(entrada.current);
+    return () => observador.disconnect();
+  }, []);
   const contenedor = useRef<HTMLDivElement>(null);
   const idLista = useId();
   const [aprendido, setAprendido] = useState(0);
@@ -47,7 +61,8 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
   // "/" o ⌘K desde cualquier parte del visor enfocan el buscador.
   useEffect(() => {
     const alPresionar = (e: KeyboardEvent) => {
-      const escribiendo = e.target instanceof HTMLElement && e.target.closest('input, textarea');
+      if (hayDialogoModal()) return;
+      const escribiendo = escribiendoEn(e.target);
       if ((e.key === '/' && !escribiendo) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
         entrada.current?.focus();
@@ -84,17 +99,23 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
       try {
         const datos = await (await fetch(url, { signal: control.signal })).json();
         const features = new GeoJSON().readFeatures(datos, { dataProjection: 'EPSG:3857' });
-        setLugares(datos.features.map((f: { id: string; properties: Record<string, string | number> }, i: number) => {
+        // Las capitales primero: "Rawson" es la capital del Chubut antes que la ciudad de San Juan.
+        const lista = datos.features.map((f: { id: string; properties: Record<string, string | number> }, i: number) => {
           const habitantes = Number(f.properties.canthab) || 0;
           const lugar = [f.properties.departamen, f.properties.provincia].filter(Boolean).join(', ');
+          const capital = esCapital(String(f.properties.nombre), String(f.properties.provincia ?? ''));
+          const detalle = habitantes ? `${lugar} · ${habitantes.toLocaleString('es-AR')} hab.` : lugar;
           return {
             id: `lugar:${f.id}`,
             tipo: 'lugar',
             titulo: String(f.properties.nombre),
-            detalle: habitantes ? `${lugar} · ${habitantes.toLocaleString('es-AR')} hab.` : lugar,
+            detalle: capital ? `Capital de ${f.properties.provincia} · ${detalle}` : detalle,
             extension: buffer(features[i].getGeometry()!.getExtent(), 6000),
-          } satisfies Sugerencia;
-        }));
+            capital,
+          };
+        });
+        setLugares(lista.sort((a: { capital: boolean }, b: { capital: boolean }) => Number(b.capital) - Number(a.capital))
+          .map(({ capital: _, ...sugerencia }: Sugerencia & { capital: boolean }) => sugerencia satisfies Sugerencia));
       } catch (error) {
         if ((error as Error).name !== 'AbortError') setLugares([]);
       } finally {
@@ -107,7 +128,7 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
     };
   }, [texto]);
 
-  const secciones: Seccion[] = useMemo(() => {
+  const seccionesBase: Seccion[] = useMemo(() => {
     if (texto.trim().length === 0) {
       const destacadas = DESTACADAS.filter(d => !historial.some(h => h.id === d.id));
       const populares = masConsultadas(3).map(i => pregunta(i)).filter(p => !historial.some(h => h.id === p.id));
@@ -128,15 +149,28 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
       ? sugerir(texto, 4).filter(i => !entendida || claveDe(i) !== claveDe(entendida)).slice(0, entendida ? 2 : 4)
       : [];
     const aprender = !entendida && analisis ? { frase: normalizar(texto), desconocidas: analisis.desconocidas } : undefined;
+    // "ruta 16": van primero los tableros de esa ruta y no se ofrece el de la RN11 (el intérprete
+    // solo conoce la RN11 y lo proponía por parecido).
+    const otraRuta = acciones.some(a => a.id.startsWith('ruta:') && !a.id.startsWith('ruta:11|'));
+    // Con otra ruta escrita tampoco se proponen preguntas sobre la RN11 ("Cursos de agua… ruta 11" al buscar "ruta 16").
+    const sinTablero = (i: Interpretacion) => !otraRuta || (i.intencion !== 'tablero' && i.lugar.tipo !== 'rn11');
+    const preguntas = [
+      { titulo: 'Tu pregunta', items: entendida && sinTablero(entendida) ? [pregunta(entendida)] : [] },
+      { titulo: entendida ? 'Otras preguntas' : palabras >= 3 ? '¿Quisiste decir…?' : 'Preguntas', items: parecidas.filter(sinTablero).map(i => pregunta(i, aprender)) },
+    ];
+    const seccionAcciones = { titulo: otraRuta ? 'Rutas nacionales' : 'Acciones', items: acciones };
     return [
-      { titulo: 'Tu pregunta', items: entendida ? [pregunta(entendida)] : [] },
-      { titulo: entendida ? 'Otras preguntas' : palabras >= 3 ? '¿Quisiste decir…?' : 'Preguntas', items: parecidas.map(i => pregunta(i, aprender)) },
-      { titulo: 'Acciones', items: acciones },
+      ...(otraRuta ? [seccionAcciones, ...preguntas] : [...preguntas, seccionAcciones]),
       { titulo: 'Capas', items: capas },
       { titulo: 'Lugares', items: lugares },
     ].filter(s => s.items.length);
   }, [texto, lugares, historial, aprendido, enVista]);
 
+  // En el modo simple, las mismas sugerencias con palabras de todos los días (sin GeoServer, capas ni RN11).
+  const secciones = useMemo(
+    () => (simple ? seccionesBase.map(sec => ({ ...sec, titulo: SECCIONES_SIMPLES[sec.titulo] ?? sec.titulo, items: sec.items.map(paraModoSimple) })) : seccionesBase),
+    [seccionesBase, simple],
+  );
   const plano = secciones.flatMap(s => s.items);
   useEffect(() => setActivo(0), [texto]);
 
@@ -161,6 +195,8 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
       e.preventDefault();
       elegir(plano[activo]);
     } else if (e.key === 'Escape') {
+      // Escape descarta lo escrito: si no, la próxima búsqueda se pegaba a la anterior.
+      setTexto('');
       setAbierto(false);
       entrada.current?.blur();
     }
@@ -183,7 +219,7 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
           }}
           onFocus={() => setAbierto(true)}
           onKeyDown={alPresionar}
-          placeholder={window.matchMedia('(min-width: 640px)').matches ? 'Buscá o preguntá: "escuelas a menos de 10 km de la RN11"' : 'Buscá o preguntá'}
+          placeholder={textoGuia(simple ? GUIAS_SIMPLE : GUIAS_PRO, anchoCampo, entrada.current)}
           aria-label="Buscar"
           role="combobox"
           aria-expanded={abierto}
@@ -314,6 +350,7 @@ function Fila({ id, sugerencia, reciente, activa, prendida, onElegir, onApuntar 
 
 function Icono({ sugerencia }: { sugerencia: Sugerencia }) {
   if (sugerencia.id === 'accion:rn11') return <EscudoRuta className="h-[22px] w-auto" />;
+  if (sugerencia.id.startsWith('ruta:')) return <EscudoRuta numero={sugerencia.id.slice(5).split('|')[0]} className="h-[22px] w-auto" />;
   if (sugerencia.tipo === 'herramienta') {
     const Componente = ICONOS_HERRAMIENTA[sugerencia.id.slice(12) as Modo];
     return <Componente size={20} />;
@@ -324,4 +361,18 @@ function Icono({ sugerencia }: { sugerencia: Sugerencia }) {
   if (sugerencia.tipo === 'pregunta') return sugerencia.aprender ? <Sparkle size={20} /> : <ChatCircleText size={20} />;
   const Componente = ICONOS_ACCION[sugerencia.id] ?? IconoCapa;
   return <Componente size={20} />;
+}
+
+// El texto guía más largo que entra en el campo, medido con la fuente real del campo (no con umbrales
+// fijos: con el tablero abierto en la tele, "Buscá un lugar, una capa o preguntá" se cortaba).
+const GUIAS_PRO = ['Buscá o preguntá: "escuelas a menos de 10 km de la RN11"', 'Buscá un lugar, una capa o preguntá', 'Buscá o preguntá'];
+const GUIAS_SIMPLE = ['Buscá un lugar o preguntá algo', 'Buscá o preguntá'];
+let lienzo: CanvasRenderingContext2D | null = null;
+function textoGuia(opciones: string[], ancho: number, campo: HTMLInputElement | null) {
+  if (!campo || !ancho) return opciones.at(-1)!;
+  lienzo ??= document.createElement('canvas').getContext('2d');
+  if (!lienzo) return opciones.at(-1)!;
+  const estilo = getComputedStyle(campo, '::placeholder');
+  lienzo.font = `${estilo.fontWeight} ${estilo.fontSize} ${estilo.fontFamily}`;
+  return opciones.find(t => lienzo!.measureText(t).width <= ancho - 8) ?? opciones.at(-1)!;
 }

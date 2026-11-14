@@ -1,4 +1,4 @@
-import { transformExtent } from 'ol/proj';
+import { transformExtent } from 'ol/proj.js';
 
 export const WORKSPACE = 'tpi';
 export const NAMESPACE = 'https://github.com/matiasgzlez/TPI-GIS';

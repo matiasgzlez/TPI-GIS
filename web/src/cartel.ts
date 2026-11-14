@@ -3,8 +3,9 @@ import { unByKey } from 'ol/Observable';
 import type { Coordinate } from 'ol/coordinate';
 import type { Pixel } from 'ol/pixel';
 import { tituloDeCapa } from './config';
-import { nombreDe } from './entidades';
-import { capasVisibles, urlConsultaPunto, type Visor } from './visor';
+import { capaSimple } from './interfaz';
+import { nombrePro, nombreSimple } from './entidades';
+import { capasVisibles, consultarPuntoWms, type Visor } from './visor';
 
 // Las capas que cubren todo (provincias, países) no se nombran al pasar: dirían "Chaco" en todos lados.
 const DE_FONDO = new Set(['provincias', 'pais_lim']);
@@ -21,12 +22,14 @@ export interface RutaBajoCursor {
 
 interface Opciones {
   habilitado: () => boolean;
+  // Modo simple: nombres de todos los días ("Ríos y arroyos", no "Cursos de agua") y "tocá dos veces".
+  simple?: () => boolean;
   alCambiarRuta?: (ruta: RutaBajoCursor | null) => void;
 }
 
 // Cartel con el nombre de lo que hay bajo el cursor. Se pide a GeoServer (GetFeatureInfo) recién
 // cuando el mouse se queda quieto, y se cancela si se vuelve a mover.
-export function activarCartel(visor: Visor, { habilitado, alCambiarRuta }: Opciones) {
+export function activarCartel(visor: Visor, { habilitado, alCambiarRuta, simple = () => false }: Opciones) {
   const elemento = document.createElement('div');
   elemento.className = 'cartel-mapa';
   const overlay = new Overlay({ element: elemento, positioning: 'bottom-center', offset: [0, -14], stopEvent: false });
@@ -37,6 +40,9 @@ export function activarCartel(visor: Visor, { habilitado, alCambiarRuta }: Opcio
   let pedido: AbortController | undefined;
   let consultado: Pixel | undefined;
   let ruta: RutaBajoCursor | null = null;
+  // Sube con cada movimiento del mapa: una respuesta pedida antes de un vuelo ya no corresponde al
+  // lugar bajo el mouse y se descarta.
+  let movimientos = 0;
 
   const ponerRuta = (nueva: RutaBajoCursor | null) => {
     if (!ruta && !nueva) return;
@@ -55,9 +61,10 @@ export function activarCartel(visor: Visor, { habilitado, alCambiarRuta }: Opcio
     if (!capas.length) return;
     pedido?.abort();
     pedido = new AbortController();
+    const movimiento = movimientos;
     try {
-      const url = urlConsultaPunto(visor, coordenada, capas, 1);
-      const datos = await (await fetch(url, { signal: pedido.signal })).json();
+      const datos = await consultarPuntoWms(visor, coordenada, capas, 1, pedido.signal);
+      if (movimiento !== movimientos || visor.mapa.getView().getAnimating()) return;
       const entidad = datos.features?.[0];
       if (!entidad) return ocultar();
       const capa = entidad.id.split('.')[0];
@@ -66,12 +73,12 @@ export function activarCartel(visor: Visor, { habilitado, alCambiarRuta }: Opcio
       if (nacional) {
         elemento.replaceChildren(
           Object.assign(document.createElement('strong'), { textContent: `Ruta Nacional ${p.nro_ruta}` }),
-          Object.assign(document.createElement('span'), { textContent: 'Doble clic para ver su tablero' }),
+          Object.assign(document.createElement('span'), { textContent: simple() ? 'Tocá dos veces para ver sus datos' : 'Doble clic para ver su tablero' }),
         );
       } else {
         elemento.replaceChildren(
-          Object.assign(document.createElement('strong'), { textContent: nombreDe(p) ?? 'Sin nombre' }),
-          Object.assign(document.createElement('span'), { textContent: tituloDeCapa(capa) }),
+          Object.assign(document.createElement('strong'), { textContent: (simple() ? nombreSimple(p) : nombrePro(p)) ?? 'Sin nombre' }),
+          Object.assign(document.createElement('span'), { textContent: (simple() && capaSimple(capa)?.titulo) || tituloDeCapa(capa) }),
         );
       }
       overlay.setPosition(coordenada);
@@ -89,16 +96,22 @@ export function activarCartel(visor: Visor, { habilitado, alCambiarRuta }: Opcio
       ocultar();
       clearTimeout(espera);
       pedido?.abort();
-      if (e.dragging || !habilitado()) return;
+      // Durante un vuelo el mapa se corre bajo el mouse: no se pregunta hasta que termine.
+      if (e.dragging || !habilitado() || visor.mapa.getView().getAnimating()) return;
       espera = setTimeout(() => consultar(e.coordinate, e.pixel), ESPERA);
     }),
-    visor.mapa.on('movestart', ocultar),
+    // Al moverse el mapa (un vuelo, el minimapa) se cancela también el pedido en curso: si no, su
+    // respuesta llegaba después y dejaba el cartel clavado donde ya no está el mouse.
+    visor.mapa.on('movestart', () => {
+      movimientos++;
+      salir();
+    }),
   ];
-  const salir = () => {
+  function salir() {
     clearTimeout(espera);
     pedido?.abort();
     ocultar();
-  };
+  }
   viewport.addEventListener('pointerleave', salir);
 
   return () => {

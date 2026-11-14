@@ -31,7 +31,7 @@ export const FloatingDock = ({ items, className }: { items: ItemDock[]; classNam
     >
       {items.map((item) => (
         <div key={item.id} className="flex items-center gap-1">
-          {item.separadoAntes && <span className="mx-1.5 h-10 w-px bg-[var(--linea)]" aria-hidden="true" />}
+          {item.separadoAntes && <span className="mx-1.5 h-10 w-px bg-[var(--linea)] max-sm:mx-0.5" aria-hidden="true" />}
           <IconContainer mouseX={mouseX} item={item} />
         </div>
       ))}
@@ -59,7 +59,7 @@ function IconContainer({ mouseX, item }: { mouseX: MotionValue<number>; item: It
       title={item.tecla ? `${item.title} (${item.tecla})` : item.title}
       onClick={item.onClick}
       className={cn(
-        "relative flex h-[66px] w-[84px] shrink-0 flex-col items-center justify-center gap-1.5 rounded-[14px] max-xl:w-[66px] transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2",
+        "relative flex h-[66px] w-[84px] shrink-0 flex-col items-center justify-center gap-1.5 rounded-[14px] max-xl:w-[66px] max-sm:h-[54px] max-sm:w-[50px] transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2",
         item.activo
           ? "text-[var(--superficie)]"
           : "text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]",
@@ -73,7 +73,8 @@ function IconContainer({ mouseX, item }: { mouseX: MotionValue<number>; item: It
           de apilado y la pastilla, al deslizarse, pasa por debajo de los nombres de los vecinos. */}
       <motion.span style={{ scale: escala }} className="relative z-10 flex flex-col items-center gap-1.5">
         <span className="flex size-6 items-center justify-center [&>svg]:size-full">{item.icon(!!item.activo)}</span>
-        <span className="text-[13px] font-medium leading-none max-xl:text-[12px]">{item.title}</span>
+        {/* En el celular entran las seis herramientas solo con íconos; el nombre queda para lectores de pantalla. */}
+        <span className="text-[13px] font-medium leading-none max-xl:text-[12px] max-sm:sr-only">{item.title}</span>
       </motion.span>
     </button>
   );

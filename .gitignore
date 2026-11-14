@@ -10,3 +10,4 @@ dist/
 .venv/
 __pycache__/
 tmp/
+*.tsbuildinfo

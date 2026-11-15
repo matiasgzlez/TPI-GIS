@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Spinner } from '@heroui/react';
-import { Bridge, CaretDown, X } from '@phosphor-icons/react';
+import { Bridge, CaretDown, Play, Stop, X } from '@phosphor-icons/react';
+import { AnimatePresence } from 'motion/react';
+import CrecerFranja from './CrecerFranja';
 import { buffer } from 'ol/extent';
 import type { AnalisisRuta, LocalidadCercana, Ruta } from '../analisisRuta';
 import { volarA, type Visor } from '../visor';
@@ -17,7 +19,9 @@ interface Props {
   onCerrar: () => void;
 }
 
-const km = (metros: number) => (metros / 1000).toLocaleString('es-AR', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+// Hacia arriba, a la décima: «a menos de X km», el mismo criterio que el contador de la animación de
+// distancia (128 m se lee 0,2 km; con el deslizador en 0,1 km todavía no entró).
+const km = (metros: number) => (Math.ceil(metros / 100) / 10).toLocaleString('es-AR', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
 // Las respuestas de la parte B para la ruta elegida, calculadas en vivo y explicadas para entenderlas
 // de un vistazo. La RN11 en Chaco es la del trabajo; cualquier otra ruta nacional sale igual.
@@ -25,6 +29,9 @@ export default function TableroRuta({ visor, ruta, analisis, error, onCerrar }: 
   // En el modo simple, lo mismo con palabras de todos los días.
   const simple = useInterfaz() === 'simple';
   const [verPuentes, setVerPuentes] = useState(false);
+  // La animación de distancia (T5): la franja crece de 0 a 20 km sobre el mapa.
+  const [creciendo, setCreciendo] = useState(false);
+  useEffect(() => setCreciendo(false), [analisis]);
   // La localidad tocada en la lista queda elegida: marcada en el mapa (con nombre y habitantes) y en
   // la lista, hasta tocar otra. Pasar el mouse por otra fila la muestra solo mientras dura.
   const [elegida, setElegida] = useState<LocalidadCercana | null>(null);
@@ -71,6 +78,10 @@ export default function TableroRuta({ visor, ruta, analisis, error, onCerrar }: 
   const [desplazado, setDesplazado] = useState(false);
 
   return (
+    <>
+    <AnimatePresence>
+      {creciendo && analisis && <CrecerFranja visor={visor} analisis={analisis} onCerrar={() => setCreciendo(false)} />}
+    </AnimatePresence>
     <section className="entra panel flex max-h-full min-h-0 flex-col overflow-hidden" aria-live="polite">
       <header className={`relative z-10 flex items-start gap-3 border-b py-4 pl-5 pr-3 transition-shadow duration-300 ${desplazado ? 'border-transparent shadow-[0_6px_16px_-8px_rgba(0,0,0,.25)]' : 'border-[var(--linea)]'}`}>
         <EscudoRuta numero={ruta.numero} className="mt-0.5 h-9 w-auto shrink-0" />
@@ -102,7 +113,16 @@ export default function TableroRuta({ visor, ruta, analisis, error, onCerrar }: 
             </section>
 
             <section className="border-b border-[var(--linea)] px-5 pb-5 pt-4">
-              <div className="mb-4 text-[13px] font-semibold text-[var(--tinta-3)]">{simple ? 'Gente que vive cerca' : 'Población afectada'}</div>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <span className="text-[13px] font-semibold text-[var(--tinta-3)]">{simple ? 'Gente que vive cerca' : 'Población afectada'}</span>
+                <button
+                  type="button"
+                  onClick={() => setCreciendo(c => !c)}
+                  className={`flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${creciendo ? 'bg-[var(--tinta)] text-[var(--superficie)]' : 'bg-[var(--superficie-2)] text-[var(--tinta)] hover:bg-[var(--superficie-3)]'}`}
+                >
+                  {creciendo ? <><Stop size={14} weight="fill" /> Cerrar la animación</> : <><Play size={14} weight="fill" /> {simple ? 'Ver crecer la franja' : 'Animar la distancia'}</>}
+                </button>
+              </div>
               <BarraApilada
                 total={<NumeroAnimado valor={analisis.franja1.habitantes + analisis.franja2.habitantes} />}
                 detalle={simple ? 'personas' : 'habitantes'}
@@ -168,6 +188,7 @@ export default function TableroRuta({ visor, ruta, analisis, error, onCerrar }: 
         )}
       </div>
     </section>
+    </>
   );
 }
 

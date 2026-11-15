@@ -639,9 +639,59 @@ Estados: `propuesto` · `aprobado` · `en curso` · `hecho` · `descartado`.
   Anotado para después (baja, no bloquea):
   - Con el foco en un botón del editor de obras, T no cierra la tabla: `escribiendoEn` cuenta todo el `form`. Esc sí cierra el editor.
   - Al abrir el editor, la tabla se agranda al instante y los botones de zoom tardan unos 0,4 s en subir. En ese lapso tapan la esquina de Exportar. Convendría animar los dos con la misma curva.
-- [ ] **T5 · Animación de distancia** — `aprobado`
+- [x] **T5 · Animación de distancia** — `hecho` (15/11; cerró con la verificación rev30)
   - La franja alrededor de la ruta crece de 0 a 20 km mientras un contador suma localidades y habitantes en vivo, con los mismos números que el tablero (refinamiento geodésico).
   - Bloqueado por: T1.
+
+  **Hecho el 15/11:**
+  - *Dónde.* En el tablero de la ruta, un botón: «Animar la distancia» en pro, «Ver crecer la franja» en simple. Abre un panel sobre el mapa, arriba al centro (`componentes/CrecerFranja.tsx`). El encuadre muestra la traza con sus 20 km debajo del panel (`volarA` acepta un margen de arriba).
+  - *El panel:*
+    - la distancia en grande, con una marca del color de la franja en la que va;
+    - el contador de localidades y habitantes, con el detalle por franja;
+    - una pista de 0 a 20 km con cada localidad en su distancia real (tamaño según habitantes), que se enciende cuando la franja la alcanza;
+    - reproducir, pausar y repetir.
+  - *Deslizador:* se arrastra o se mueve con las flechas (medio km) y Re Pág / Av Pág (2 km); `aria-valuetext` dice distancia, localidades y habitantes.
+  - *El barrido* es lineal (7 s de 0 a 20 km): cada km tarda lo mismo y el contador se lee honesto.
+  - *En el mapa* (`ponerRadioAnimado` en `visor.ts`):
+    - las bandas tienen el ancho de la distancia actual, un poco más intensas;
+    - cada burbuja aparece cuando la franja la alcanza, con un pequeño «pop»;
+    - los nombres aparecen cuando la burbuja terminó de entrar.
+  - *Los números:* salen de las mismas distancias geodésicas del tablero (`contarHasta`). A 10 km dan 22 localidades y 363.320 habitantes; a 20 km, 37 y 389.400, los de referencia.
+  - *Movimiento reducido:* sin barrido, arranca en 20 km y se recorre con el deslizador.
+  - *Impresión:* al abrir Imprimir se corta la animación (`terminarAnimacion`), así la hoja sale con las franjas enteras. Esc o ✕ cierran el panel y el tablero vuelve a las franjas enteras.
+  - *Batería.* Prueba `distancia` (simple y pro, tres tamaños, claro y oscuro):
+    - arranca en 0 y crece;
+    - a 20 km, los números de referencia;
+    - a 10 km con las flechas, los de la franja 1;
+    - la traza queda debajo del panel;
+    - Esc cierra;
+    - axe.
+
+  **Revisión rev27 (cierre, 15/11): NO APROBADO** (simple: diseño 8, usabilidad 7, creatividad 8,5, contenido 8,5; pro: 8, 7, 8, 9). Los números coincidieron en las 201 posiciones del deslizador y en la RN16 y la RN89. Hallazgos y qué se hizo:
+  1. El panel quedaba a más de 40 Tabs de su botón: al abrirse, el foco va a Reproducir/Pausar.
+  2. Al cerrar, el foco se perdía, y Esc solo andaba con el foco adentro del panel. Ahora el foco vuelve a quien lo abrió, y Esc lo cierra desde cualquier lugar (antes que el Esc general), salvo que haya un diálogo o se esté escribiendo.
+  3. Los anuncios se duplicaban: el contador ya no es una región viva. Se anuncia una sola vez al pausar («Pausa. En 1,2 km: …») y al llegar («A 20 km: 37 localidades, 389.400 habitantes»). Con el deslizador habla su `aria-valuetext`.
+  4. La lista del tablero redondeaba a la décima y el contador contaba con la distancia exacta. La lista redondea ahora hacia arriba («a menos de»): 128 m se lee 0,2 km y con el deslizador en 0,1 todavía no entró.
+  5. Con movimiento reducido, «Repetir» no hacía nada: ahora el botón dice «Ir a 0 km» / «Ir a 20 km» y salta.
+  6. La punta de la RN16 quedaba bajo el zoom y el minimapa: el encuadre reserva ese bloque, a la derecha si la ruta es más ancha que alta y abajo si no.
+  7. Con la animación abierta, el botón del tablero dice «Cerrar la animación».
+
+  **Verificación rev28 (corrección, 15/11): NO APROBADO.** De los 7 hallazgos, 6 quedaron resueltos.
+  - Pendiente: al pausar, el anuncio a veces quedaba un cuadro atrás del panel (2 de 12 veces a 2560). Ahora la distancia de cada cuadro se guarda aparte: al pausar se corta el cuadro pendiente y el panel y el anuncio usan ese mismo valor. En 12 pausas al azar a 2560 coincidieron siempre.
+  - De paso:
+    - con las Referencias del modo simple abiertas, Esc cierra primero las Referencias;
+    - el botón del tablero ya no tiene `aria-pressed`, porque cambia de nombre.
+
+  **Verificación rev29 (corrección, 15/11): NO APROBADO.** El anuncio al pausar coincidió siempre y el botón quedó sin `aria-pressed`. Faltaban dos casos:
+  - Si las Referencias se abrían antes que la animación, un solo Esc cerraba las dos: el de las Referencias usaba `stopPropagation`, que no frena a otro escucha de la misma ventana. Ahora usa `stopImmediatePropagation`.
+  - Reproducir y pausar en el mismo cuadro saltaba a la distancia de la corrida anterior. Ahora el punto de partida se fija al arrancar.
+  - Probado a 1366 y 2560: el primer Esc cierra las Referencias y el segundo el panel; Enter Enter desde 5 km queda en 5,0 km.
+
+  **Verificación rev30 (corrección, 15/11): APROBADO.**
+  - Esc con las Referencias anda en los dos órdenes, en los tres tamaños.
+  - Reproducir y pausar en el mismo cuadro anduvo bien en 42 de 42 casos.
+  - Los números a 10 y 20 km son exactos y no hubo regresiones.
+  - Anotado (muy baja): dos `click()` en la misma tarea de JS (solo desde un script) no emiten el anuncio de pausa.
 - [ ] **T6 · Comparador deslizante** — `aprobado`
   - Cortina que divide el mapa en dos juegos de capas elegibles, con el atajo "Natural vs. Humano".
   - Bloqueado por: T1.

@@ -799,3 +799,49 @@ export function tabla(combo, entorno) {
     anotar('…y el foco vuelve al botón de la tabla', await p.evaluate(() => document.activeElement?.getAttribute('aria-label')) === 'Tabla de datos (T)');
   }, entorno, combo);
 }
+
+// --- Animación de distancia (T5) ---
+// La franja crece de 0 a 20 km sobre el tablero de la RN11: a 10 y a 20 km, los mismos números de
+// referencia del tablero (PostGIS geodésico).
+export function distancia(combo, entorno) {
+  return envolver('distancia', combo, async ({ p, anotar, informe }) => {
+    const simple = combo.modo === 'simple';
+    await p.getByRole('button', { name: /Ver RN11|Ver la ruta 11/ }).first().click();
+    await p.waitForFunction(() => /Localidades, de la más|Pueblos, del más/.test(document.body.innerText), null, { timeout: 30000 });
+    await esperarMapa(p);
+    await p.getByRole('button', { name: /Animar la distancia|Ver crecer la franja/ }).click();
+    const panel = p.locator('.crecer-franja');
+    await panel.waitFor({ timeout: 5000 });
+    const contador = () => panel.locator('.contador-franja').innerText();
+    // Arranca en 0 y crece.
+    await pausa(1200);
+    const temprano = await p.locator('.crecer-franja input[type=range]').inputValue();
+    anotar('la franja arranca en 0 y crece', Number(temprano) > 0 && Number(temprano) < 20000, `${temprano} m a los 1,2 s`);
+    await capturar(p, informe, entorno.salida, 'creciendo');
+    const llego = await p.waitForFunction(() => /A 20 km/.test(document.querySelector('.crecer-franja')?.textContent ?? ''), null, { timeout: 15000 }).then(() => true).catch(() => false);
+    const [h10, hab10] = REFERENCIA_RN11.hasta10; const [h20, hab20] = REFERENCIA_RN11.de10a20;
+    const totalLoc = String(Number(h10) + Number(h20));
+    const totalHab = (Number(hab10.replace(/\./g, '')) + Number(hab20.replace(/\./g, ''))).toLocaleString('es-AR');
+    const final = await contador();
+    anotar(`a 20 km: ${totalLoc} ${simple ? 'pueblos' : 'localidades'} y ${totalHab} hab., como el tablero`, llego && final.includes(totalLoc) && final.includes(totalHab) && final.includes(hab10) && final.includes(hab20), final.replace(/\n/g, ' '));
+    await esperarMapa(p);
+    await capturar(p, informe, entorno.salida, 'final');
+    // A 10 km con el deslizador (flechas: medio km por paso).
+    const deslizador = p.locator('.crecer-franja input[type=range]');
+    await deslizador.focus();
+    for (let i = 0; i < 20; i++) await p.keyboard.press('ArrowLeft');
+    const texto = await deslizador.getAttribute('aria-valuetext');
+    anotar(`a 10 km con las flechas: ${h10} y ${hab10}`, /^10,0 km/.test(texto) && texto.includes(` ${h10} `) && texto.includes(hab10), texto);
+    const v = await axe(p);
+    anotar('axe sin violaciones (animación de distancia)', v.length === 0, v.join(' · '));
+    // La traza queda entera a la vista, debajo del panel.
+    const visible = await p.evaluate(() => {
+      const v = window.__visor(); const e = v.ruta.getSource().getExtent();
+      const arriba = v.mapa.getPixelFromCoordinate([e[0], e[3]])[1] + v.mapa.getTargetElement().getBoundingClientRect().top;
+      return { arriba, panel: document.querySelector('.crecer-franja').getBoundingClientRect().bottom };
+    });
+    anotar('la traza queda debajo del panel', visible.arriba >= visible.panel - 4, `traza desde ${Math.round(visible.arriba)} · panel hasta ${Math.round(visible.panel)}`);
+    await p.keyboard.press('Escape');
+    anotar('Esc cierra la animación', await panel.waitFor({ state: 'detached', timeout: 3000 }).then(() => true).catch(() => false));
+  }, entorno, combo);
+}

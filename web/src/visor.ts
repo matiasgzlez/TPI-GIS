@@ -147,6 +147,24 @@ const ancho = (metros: number, resolucion: number, cosLatitud: number) => (2 * m
 // (0,16 de opacidad a escala provincia, 0,06 a escala local).
 const opacidadBanda = (resolucion: number) => Math.min(0.16, Math.max(0.06, 0.04 + resolucion / 2500));
 
+// Animación de distancia (T5): la franja crece de 0 a 20 km. Mientras dura, las bandas tienen ese
+// ancho y solo aparecen las localidades que ya alcanzó (con un pequeño "pop" al entrar). null: el
+// tablero normal, con las dos franjas enteras. La hoja impresa siempre sale con las franjas enteras.
+let radioAnimado: number | null = null;
+export function ponerRadioAnimado(visor: Visor, metros: number | null) {
+  radioAnimado = metros;
+  visor.analisis.changed();
+}
+export const hayRadioAnimado = () => radioAnimado !== null;
+// Quien muestra la animación se entera cuando hay que cortarla (por ejemplo, al abrir Imprimir).
+export const alTerminarAnimacion = new Set<() => void>();
+export function terminarAnimacion(visor: Visor) {
+  alTerminarAnimacion.forEach(f => f());
+  ponerRadioAnimado(visor, null);
+}
+// Cuánto crece la burbuja al entrar: llega a su tamaño a los 900 m de franja.
+const entrada = (distancia: number) => (radioAnimado === null ? 1 : Math.max(0, Math.min(1, (radioAnimado - distancia) / 900)));
+
 // Radio de la burbuja: el área es proporcional a los habitantes (Resistencia, unos 290 000, llega al tope).
 export const radioLocalidad = (habitantes: number) => tamanoMapa(Math.min(4 + Math.sqrt(habitantes) / 32, 20));
 
@@ -155,6 +173,14 @@ function estiloAnalisis(feature: import('ol/Feature').FeatureLike, resolucion: n
   if (tipo === 'traza') {
     const cos = feature.get('cos_latitud') ?? Math.cos((27 * Math.PI) / 180);
     const alfa = opacidadBanda(resolucion);
+    if (radioAnimado !== null) {
+      // Creciendo: un poco más intensas, y el frente de la franja marcado con un borde.
+      const r = Math.max(1, radioAnimado);
+      const estilos = [];
+      if (r > 10_000) estilos.push(new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato2, Math.min(0.32, alfa * 1.7)), width: ancho(r, resolucion, cos), lineCap: 'round', lineJoin: 'round' }) }));
+      estilos.push(new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato1, Math.min(0.32, alfa * 1.7)), width: ancho(Math.min(r, 10_000), resolucion, cos), lineCap: 'round', lineJoin: 'round' }) }));
+      return estilos;
+    }
     return [
       new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato2, alfa), width: ancho(20_000, resolucion, cos), lineCap: 'round', lineJoin: 'round' }) }),
       new Style({ stroke: new Stroke({ color: hacerTransparente(paleta.dato1, alfa), width: ancho(10_000, resolucion, cos), lineCap: 'round', lineJoin: 'round' }) }),
@@ -163,11 +189,14 @@ function estiloAnalisis(feature: import('ol/Feature').FeatureLike, resolucion: n
   if (tipo === 'localidad') {
     // Más lejos que 1:5.000.000 las burbujas se amontonan en un manchón: queda solo la traza con sus franjas.
     if (resolucion > 1500) return undefined;
+    // Animando: todavía no la alcanzó la franja.
+    const escalaEntrada = entrada(Number(feature.get('distancia')) || 0);
+    if (escalaEntrada <= 0) return undefined;
     const habitantes = Number(feature.get('habitantes')) || 0;
     const color = feature.get('franja') === 1 ? paleta.dato1 : paleta.dato2;
     const elegida = !!feature.get('elegida');
     // Sin dato de habitantes: un anillo hueco, así no se confunde con un pueblo chico.
-    const radio = habitantes ? radioLocalidad(habitantes) : tamanoMapa(4);
+    const radio = (habitantes ? radioLocalidad(habitantes) : tamanoMapa(4)) * (escalaEntrada < 1 ? 0.4 + 0.6 * escalaEntrada + 0.25 * Math.sin(Math.PI * escalaEntrada) : 1);
     const estilo = new Style({
       image: new Circle({
         // El declutter es solo para los rótulos: ninguna burbuja se esconde.
@@ -193,6 +222,7 @@ function estiloAnalisis(feature: import('ol/Feature').FeatureLike, resolucion: n
 // pobladas primero. Las sin dato, recién de cerca. La elegida la rotula la capa de foco (estiloFoco).
 function estiloNombres(feature: import('ol/Feature').FeatureLike, resolucion: number) {
   if (feature.get('tipo_analisis') !== 'localidad' || feature.get('elegida') || resolucion > 1500) return undefined;
+  if (entrada(Number(feature.get('distancia')) || 0) < 1) return undefined;
   const habitantes = Number(feature.get('habitantes')) || 0;
   const nombre = String(feature.get('nombre') ?? '');
   if (!nombre || /^sin nombre$/i.test(nombre) || (!habitantes && resolucion >= 300)) return undefined;
@@ -660,12 +690,19 @@ export function formatoCoordenada(coordenada: Coordinate) {
 }
 
 
-export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: number; duracion?: number; conPanel?: boolean; minResolution?: number } = {}) {
+// `arriba`: píxeles del mapa tapados desde arriba por algo que está a la vista (el panel de la animación
+// de distancia), si son más que el margen de siempre.
+// `derecha` y `abajo`: lo mismo para los otros bordes (el bloque de zoom y minimapa).
+export function volarA(visor: Visor, extension: number[], opciones: { maxZoom?: number; duracion?: number; conPanel?: boolean; minResolution?: number; arriba?: number; derecha?: number; abajo?: number } = {}) {
   const vista = visor.mapa.getView();
   vista.cancelAnimations();
+  const margenes = margenesMapa(opciones.conPanel);
+  if (opciones.arriba) margenes[0] = Math.max(margenes[0], Math.round(opciones.arriba));
+  if (opciones.derecha) margenes[1] = Math.max(margenes[1], Math.round(opciones.derecha));
+  if (opciones.abajo) margenes[2] = Math.max(margenes[2], Math.round(opciones.abajo));
   vista.fit(extension, {
     size: visor.mapa.getSize(),
-    padding: margenesMapa(opciones.conPanel),
+    padding: margenes,
     maxZoom: opciones.maxZoom ?? 14,
     minResolution: opciones.minResolution,
     duration: movimientoReducido() ? 0 : opciones.duracion ?? 900,

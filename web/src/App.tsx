@@ -32,7 +32,7 @@ import { guardarObra, type DatosObra } from './obras';
 import { useTema } from './tema';
 import { usePreferencias } from './preferencias';
 import { RESORTE_PANEL } from './movimiento';
-import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, capasVisibles, crearVisor, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
+import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, capasVisibles, crearVisor, terminarAnimacion, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
 import { tituloProvincia } from './provincias';
 import { AvisoCalor } from './componentes/Calor';
 import type { Contenido } from './exportar/pdf';
@@ -103,6 +103,8 @@ export default function App() {
 
   // El encuadre del mapa deja libres los bordes que tapa la interfaz a la vista.
   useEffect(() => ponerDisposicion(interfaz, plegado, inspectorPlegado, tabla ? altoTabla : 0), [interfaz, plegado, inspectorPlegado, tabla, altoTabla]);
+  // La hoja impresa sale con las franjas enteras: al abrir Imprimir se corta la animación de distancia (T5).
+  useEffect(() => { if (exportar && visor) terminarAnimacion(visor); }, [exportar, visor]);
   // La tabla es del profesional: al pasar al simple se cierra.
   useEffect(() => { if (interfaz !== 'pro') setTabla(null); }, [interfaz]);
   // En el profesional, un resultado nuevo o el tablero se muestran en "Información".
@@ -354,6 +356,7 @@ export default function App() {
     analisis.localidades.forEach(l => {
       l.feature.set('tipo_analisis', 'localidad');
       l.feature.set('habitantes', l.habitantes);
+      l.feature.set('distancia', l.distancia);
     });
     analisis.puentes.forEach(p => p.feature.set('tipo_analisis', 'puente'));
     visor.analisis.addFeatures([...analisis.localidades.map(l => l.feature), ...analisis.puentes.map(p => p.feature)]);
@@ -961,7 +964,9 @@ function BotonReferencias({ visor, compacto }: { visor: Visor; compacto?: boolea
     const alPresionar = (e: KeyboardEvent) => {
       // Con un diálogo modal encima (la guía), el Escape es del diálogo.
       if (e.key !== 'Escape' || hayDialogoModal()) return;
-      e.stopPropagation();
+      // stopImmediatePropagation: también frena a los otros Esc en captura de la ventana (el panel de la
+      // animación de distancia), así un Esc cierra solo lo de adelante.
+      e.stopImmediatePropagation();
       setAbierto(false);
       boton.current?.focus();
     };

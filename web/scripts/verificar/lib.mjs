@@ -50,7 +50,9 @@ export async function abrir(navegador, { url, w, h, modo = 'simple', tema = 'cla
   const p = await ctx.newPage();
   const registro = { errores: [], externos: [], fallas: [] };
   p.on('pageerror', e => registro.errores.push('pageerror ' + String(e).slice(0, 200)));
-  p.on('console', m => (m.type() === 'error' || m.type() === 'warning') && registro.errores.push(`${m.type()} ${m.text().slice(0, 200)}`));
+  // Los avisos del WebGL por software (Chromium sin GPU: el mapa de calor) son del entorno, no de la app.
+  const delEntorno = t => /GL Driver Message|software WebGL|swiftshader/i.test(t);
+  p.on('console', m => (m.type() === 'error' || m.type() === 'warning') && !delEntorno(m.text()) && registro.errores.push(`${m.type()} ${m.text().slice(0, 200)}`));
   p.on('request', r => { const u = new URL(r.url()); if (!['localhost', '127.0.0.1'].includes(u.hostname) && !/^(data|blob):/.test(u.protocol)) registro.externos.push(r.url()); });
   p.on('response', r => { if (r.status() >= 400) registro.fallas.push(`${r.status()} ${r.url().slice(0, 140)}`); });
   let cdp;

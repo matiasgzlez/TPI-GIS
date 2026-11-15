@@ -182,7 +182,8 @@ async function consultarPunto(visor: Visor, coordenada: number[]): Promise<Consu
 // reglas (hasta unos KB) lleva el BBOX adentro, y en 2.0.0 GeoServer no acepta filtros ogc:.
 // Devuelve null si la capa no se dibuja a esta escala.
 async function consultarCapaVisible(visor: Visor, capa: string, extension: number[]): Promise<ResultadoCapa | null> {
-  const reglas = filtroVisible(capa, denominadorWms(visor));
+  // Una capa en calor se ve como mancha a cualquier escala: se consulta sin el filtro de escala de sus puntos.
+  const reglas = visor.calor.has(capa) ? '' : filtroVisible(capa, denominadorWms(visor));
   if (reglas === false) return null;
   const [x1, y1, x2, y2] = extension;
   const caja = '<ogc:BBOX><ogc:PropertyName>geom</ogc:PropertyName><gml:Envelope srsName="EPSG:3857">'
@@ -219,7 +220,7 @@ export async function consultarCapaEnExtension(visor: Visor, capa: string, exten
 
 // Campos técnicos del IGN (identificadores, metadatos de carga, símbolos de MicroStation) que no le
 // dicen nada a quien consulta el mapa.
-const OCULTOS = new Set([
+export const OCULTOS = new Set([
   'gid', 'id', 'fid', 'objectid', 'cell_name', 'group', 'rotation', 'shape_leng', 'shape_area', 'length',
   'signo', 'operador', 'responsabl', 'cargo', 'dataset', 'fclass', 'sp', 'datum', 'ac', 't_act', 'coord', 'progreso', 'actualizac',
 ]);

@@ -481,16 +481,164 @@ Estados: `propuesto` · `aprobado` · `en curso` · `hecho` · `descartado`.
   - Confirmar el ritmo de cuadros en la tele real, con GPU (sin GPU, el paso de página va a ~20 fps).
   - El JS al abrir el visor (366 KB contra 320 KB) viene de antes de T2.
 
-- [ ] **T3 · Mapas de calor** — `aprobado`
+- [x] **T3 · Mapas de calor** — `hecho` (14/11; cerró con la verificación rev23)
   - Población pesada por `canthab` (3.356 de las 10.804 localidades tienen habitantes).
   - Densidad para capas de puntos, con selector Puntos / Calor.
   - En el modo simple: la tarjeta "¿Dónde vive la gente?" y el botón "ver como manchas".
   - `Heatmap` de OpenLayers con datos WFS limitados a lo visible.
   - Bloqueado por: T1.
-- [ ] **T4 · Tabla de datos (modo profesional)** — `aprobado`
+
+  **Hecho el 14/11** (con las correcciones de la revisión rev21):
+  - *Datos* (`calor.ts`).
+    - Cada capa en calor tiene un control que, cuando el mapa se queda quieto, pide por WFS los puntos de lo que se ve (con un margen de un cuarto del ancho) y reemplaza a los anteriores. El de la hoja impresa es aparte: pide su propio encuadre y no le cambia los datos al mapa.
+    - Nunca hay una mancha parcial. Si en lo visible hay más de 60.000 puntos, la mancha se vacía y se avisa que hay que acercarse. "Otras edificaciones" (96.056) lo pide a escala país; las 10.804 localidades entran siempre.
+    - Si un pedido falla, no se reintenta solo: se avisa, con "Reintentar".
+    - Población: solo las localidades con `canthab > 0`. Cada una pesa (habitantes / 300.000) ^ 0,35: Resistencia 0,97, una ciudad de 50.000 0,53 y un pueblo de 2.000 0,17. De lejos, cada lugar pesa menos, porque a escala país la mitad norte saturaba.
+    - Densidad: el peso depende de cuántos puntos se ven en ese momento (lo recalcula la capa al quedarse quieto el mapa): 0,7 con 150 o menos, así un hospital solo se ve; 0,05 con 5.000; 0,012 con las 36.000 casas de la provincia.
+    - Antes de bajar los puntos se pide el conteo (`resultType=hits`); si pasan el tope, no se bajan.
+  - *La capa* (`capaCalor.ts`, `calorColores.ts`).
+    - Es un grupo: la mancha (`Heatmap`) y, en la de población, los nombres de los lugares, porque al pasar a calor las localidades salen del WMS y con ellas sus rótulos. De lejos solo se rotulan las ciudades grandes; de cerca, todos los lugares.
+    - El tamaño de la mancha va en metros: de lejos, manchas regionales; de cerca, cada lugar. La pantalla 2K solo agranda sus topes en píxeles.
+    - Rampas por tema. Población en magma, para que no se confunda con el naranja de las rutas; en oscuro, la rampa va hacia los claros. Densidad en violeta.
+  - *En el visor* (`cambiarCalor` en `visor.ts`).
+    - Una capa en calor sale del WMS, así sus puntos no se dibujan debajo de las manchas.
+    - Las consultas por punto y por rectángulo siguen funcionando sobre esa capa, sin el filtro de escala de sus puntos.
+    - El deslizador de opacidad también actúa sobre la mancha.
+    - Apagar la capa apaga su calor.
+  - *Estado a la vista.*
+    - Debajo del selector (pro) o del botón (simple) hay una línea de estado: cargando, cuántos puntos, demasiados o error.
+    - Sobre el mapa aparece un aviso cuando hay demasiados puntos (con "Acercar") o cuando falló un pedido (con "Reintentar").
+  - *Pro.*
+    - Selector "Puntos | Calor" al lado de "Leyenda y ajustes" en cada capa de puntos prendida, salvo las obras de la RN11 (son pocas y cada una importa).
+    - Es un grupo de radios con flechas: el Tab entra y sale en un solo paso.
+    - En el lugar de la leyenda de esa capa aparece la rampa "Menos / Más habitantes" (o densidad), con la nota del método.
+  - *Simple.*
+    - Tarjeta "¿Dónde vive la gente?" arriba de todo, a todo el ancho, con manchas dibujadas que laten mientras está activa. Con movimiento reducido, no laten.
+    - Al tocar la tarjeta de nuevo, el mapa vuelve a como estaba: si la tarjeta prendió las localidades, las apaga.
+    - Botón "Ver como manchas" / "Ver como puntos" en cada capa de puntos prendida.
+    - Leyenda "Poca gente / Mucha gente" (o "Pocos / Muchos").
+    - Con la mancha activa no aparece el aviso "Se ve de más cerca", que solo vale para los puntos del WMS.
+  - *Impresión.*
+    - La hoja carga las manchas de su propio encuadre y, en la leyenda, pone la rampa con sus extremos ("Localidades (mapa de calor)").
+    - Si la mancha no se pudo cargar (error o demasiados puntos), la hoja da un error que dice por qué y no deja descargar. Es la misma promesa de T2: nunca un PDF incompleto.
+  - *Peso.*
+    - El WebGL del `Heatmap` va en un fragmento diferido (32 KB comprimidos) que se baja al prender el primer calor.
+    - Hubo que sacar OpenLayers del grupo manual de Vite: el empaquetador metía igual en el fragmento inicial los 13 módulos de WebGL.
+    - El JS al abrir el visor queda en 376 KB, 10 KB más que antes de T3, por la interfaz del calor.
+  - *Batería.* Prueba `calor`:
+    - el selector de pro, ida y vuelta, el WMS sin los puntos y la leyenda;
+    - imprimir con la mancha caída: da error y no deja descargar;
+    - con el WFS caído, no hay pedidos en bucle y aparece el aviso con "Reintentar";
+    - "Otras edificaciones" a escala país: mancha vacía (nunca parcial) y aviso con "Acercar";
+    - la tarjeta de simple, ida y vuelta, volviendo a como estaba;
+    - "Ver como manchas" con las escuelas;
+    - axe.
+
+    Los avisos del WebGL por software de Chromium sin GPU no cuentan como errores de consola. La prueba del manual con el teclado ahora espera a que termine el desplazamiento suave en vez de una pausa fija (fallaba a veces).
+
+  **Revisión rev21 (cierre, 14/11): NO APROBADO** (simple ≈ 7,05; pro ≈ 6,55). Hallazgos y qué se hizo:
+  1. El PDF salía sin la mancha y se podía descargar: la hoja carga su propio calor y, si falla, da error sin descarga.
+  2. Con el WFS caído había un bucle de unos 30 pedidos por segundo: no hay reintentos automáticos.
+  3. Con el tope, la mancha parcial dejaba regiones vacías: ahora la mancha se vacía y se pide acercarse.
+  4. El aviso de "parcial" quedaba viejo: el estado se publica en cada carga.
+  5. En simple no se veía el estado: línea de estado y aviso sobre el mapa.
+  6. Con movimiento reducido, el latido parpadeaba: con movimiento reducido no hay latido.
+  7. La opacidad no hacía nada sobre la mancha: ahora sí.
+  8. Legibilidad: no había nombres de lugares, el naranja se confundía con las rutas, la rampa no servía en oscuro, la densidad saturaba y los puntos sueltos no se veían. Se agregaron los rótulos, las rampas por tema y los pesos por cantidad, y el tamaño en metros.
+  9. Se ofrecía calor para las obras de la RN11: ya no.
+  10. Las etiquetas de la leyenda se pegaban, el selector tenía varias paradas de Tab y la consulta por rectángulo ignoraba las capas en calor: corregido.
+  **Revisión rev22 (cierre, 14/11): NO APROBADO** (simple ≈ 7,65; pro ≈ 7,15). Los 10 hallazgos de rev21 quedaron resueltos salvo la legibilidad de la densidad. Hallazgos y qué se hizo:
+  1. La leyenda no seguía el cambio de tema y contradecía al mapa: la leyenda y el dibujo de la tarjeta leen el tema en vivo.
+  2. La densidad saturaba en las capas grandes, y su intensidad dependía de cómo se llegaba a la vista.
+     - Ahora el peso de cada punto es una variable de la capa. Se recalcula con lo que se ve cada vez que el mapa queda quieto: 0,7 × (150 / puntos a la vista) ^ 0,75, entre 0,008 y 0,7.
+     - La mancha de densidad es más chica que la de población.
+     - En oscuro, la rampa termina en un violeta claro, no en blanco.
+  3. La consulta por punto conservaba el filtro de escala: para las capas en calor se manda un SLD sin escalas.
+  4. El error de imprimir con demasiados puntos hablaba de GeoServer y ofrecía Reintentar: ahora ofrece «Ver más cerca», que acerca la escala de la hoja.
+  5. Con demasiados puntos se bajaban 1,4 MB para tirarlos:
+     - primero se pide solo el conteo (`resultType=hits`);
+     - el aviso dice «en esta zona», porque el conteo incluye el margen.
+  6. Pulido:
+     - «Menos/Más habitantes» va en un renglón;
+     - después de Reintentar, el foco vuelve al mapa;
+     - el dibujo de la tarjeta usa la rampa del tema.
+  - De T2, encontrado de paso: al abrir la impresión con «p» la letra se escribía en el título. Corregido con `preventDefault`.
+  - La batería suma tres pruebas: la rampa de la leyenda al cambiar de tema, el peso de la densidad al alejarse y volver, y la consulta por punto sobre la mancha a escala región.
+
+  **Verificación rev23 (corrección, 14/11): APROBADO.** Los 6 hallazgos de rev22 y la «p» de T2, resueltos en la app real; batería sin fallas. Anotado para después (baja, no bloquea):
+  - «Otras edificaciones» en calor a 1:1,8M baja 6,6 MB en 1366 y 11,2 MB en 2560 (la hoja impresa, hasta 12,8 MB). Se podría pedir menos decimales o centroides simplificados.
+  - En 1366 claro, el núcleo de esa mancha queda casi uniforme y los rótulos violetas encima tienen poco contraste. En 2560 se lee mejor, porque el peso depende de cuántos puntos se ven.
+  - En pro 1536, «Menos / Más habitantes» quedan a unos 4 px.
+
+- [x] **T4 · Tabla de datos (modo profesional)** — `hecho` (15/11; cerró con la verificación rev26)
   - Tabla por capa vía WFS: buscar, ordenar, filtrar, "ir a la entidad" y exportar a CSV o GeoJSON. Paginada.
   - Solo lectura, salvo `obras_rn11` (WFS-T).
   - Bloqueado por: T1.
+
+  **Hecho el 15/11:**
+  - *Dónde.* Un cajón abajo, entre las capas y el inspector, sobre la barra de estado (`componentes/pro/TablaDatos.tsx`, carga diferida: 42 KB comprimidos más dos piezas chicas; el editor de obras, `EditarObra.tsx`, baja aparte recién al editar).
+    - Se abre con la tecla T, con el botón de tabla de la barra de arriba o con «Tabla» en cada capa prendida del panel. Arriba tiene una pestaña por capa prendida.
+    - Alto compacto (42 % del alto libre, mínimo 320 px) o agrandado (68 %).
+    - Con la tabla abierta, el encuadre del mapa deja libre su alto (`ponerDisposicion`) y los botones de zoom y el minimapa suben.
+    - Al pasar al modo simple, se cierra.
+  - *Datos* (`tabla.ts`). Todo lo hace GeoServer por WFS: pagina de a 50, ordena (`sortBy`) y filtra (CQL). Así «Otras edificaciones» (96.056) se recorre igual que una capa de 20.
+    - Columnas por `DescribeFeatureType`, sin los campos técnicos del IGN. Primero el nombre y los datos clave de la ficha; al final precisión, escala y fuente. La primera columna queda fija al desplazar.
+    - *Buscar:* en todas las columnas de texto, sin tildes ni mayúsculas (`strStripAccents` + `ILIKE`); un número busca también en las columnas numéricas.
+    - *Filtrar:* por columna, con condición (contiene, es igual a, mayor que, menor que, está vacío, tiene dato) y valor, como chips que se quitan uno por uno. También «Solo lo que se ve» (BBOX de la vista, se actualiza al mover el mapa).
+    - *Ordenar:* clic en el encabezado (ascendente o descendente).
+  - *Ir a la entidad:* clic o Enter en una fila. Trae la entidad con su geometría, prende la capa si estaba apagada, la muestra en el inspector («desde la tabla»), la selecciona y vuela hasta ella arriba de la tabla.
+  - *Exportar:* CSV (geometría en WKT, WGS 84, con BOM para Excel) o GeoJSON, con todo lo filtrado, no solo la página, hasta 100.000 entidades.
+  - *Obras de la RN11 (WFS-T):* activar una obra va a ella y abre al costado un panel para editar tipo, prioridad, estado y descripción (`wfs:Update`), o borrarla con confirmación (`wfs:Delete`). Después se recarga la página y el WMS.
+    - La celda «Editar» no tiene un botón adentro: la celda ya es enfocable y axe marcaba los controles anidados.
+  - *Accesibilidad:*
+    - grilla de react-aria (HeroUI Table) con flechas, encabezados ordenables con `aria-sort` y pestañas de capa con flechas;
+    - el pie anuncia «1–50 de N» (`role=status`);
+    - mientras carga, filas que respiran (quietas con movimiento reducido).
+  - De paso: rótulos que faltaban (situacion, trafico, categoría, km inicial, fecha de relevamiento, códigos) y la tecla T en la lista de atajos de Configuración.
+  - *Batería.* Prueba `tabla` (pro, 1366 claro, 1536 oscuro y 2560 claro). Compara cada número con pedidos WFS hechos aparte:
+    - T abre y cuenta todas las localidades;
+    - los botones de zoom quedan sobre la tabla;
+    - buscar «resisténcia»;
+    - filtro de habitantes mayor que 100.000;
+    - orden descendente, con la primera fila igual a la de mayor población;
+    - página siguiente;
+    - el CSV tiene todas las filas filtradas y la geometría;
+    - Enter en una fila va a la entidad y la deja a la vista arriba de la tabla;
+    - con `--con-alta`, editar y borrar una obra de prueba;
+    - axe en tres estados;
+    - T la cierra.
+  - El JS al abrir el visor pasa de 377 a 380 KB.
+
+  **Revisión rev24 (cierre, 15/11): NO APROBADO** (diseño 8, usabilidad 7,5, creatividad 7, contenido 8,5). Hallazgos y qué se hizo:
+  1. Las flechas en las pestañas tiraban un error y el foco no seguía a la pestaña: se guarda el elemento antes del `requestAnimationFrame`. Se suman Home y End, y un `tabpanel` con `aria-controls`.
+  2. axe marcaba el esqueleto de carga (`aria-label` sin rol): ahora tiene `role=status`.
+  3. «Solo lo que se ve» contaba lo que tapan los paneles y la tabla: usa el rectángulo libre del mapa (`extensionLibre`) y se recalcula al agrandar o achicar la tabla.
+  4. La tabla de obras no se actualizaba después de un alta con Nueva obra: App le avisa (`recargaObras`).
+  5. El inspector quedaba viejo después de editar una obra: se vuelve a traer la obra. Si se borró, se cierra.
+  6. El foco se perdía: al cerrar el editor, después de guardar o borrar, vuelve a la fila o a la grilla; al cerrar la tabla, al botón de la tabla.
+  7. La exportación se cortaba en 100.000 sin avisar: el rótulo y el aviso dicen «100.000 de 120.470 (tope)» y sugieren filtrar.
+  8. La pestaña abierta podía quedar fuera de vista: se desplaza hasta verse y los bordes se desvanecen.
+  9. El esqueleto se desbordaba sobre el pie: ahora queda recortado.
+  10. A la primera columna fija le faltaba la línea divisoria en algunas filas: corregido.
+  11. El pie decía «Cargando…» con error: ahora dice «Sin datos». Los errores de red del editor salen en castellano.
+  12. «1.5» se leía como 15: un punto es de miles solo si separa grupos de tres cifras.
+  13. La búsqueda miraba precisión, escala y fuente (con «IGN» coincidía todo): esas columnas quedan afuera. Con «ñ» se busca tal cual.
+  14. El GeoJSON salía con 4 decimales: se pide en EPSG:3857 y se reproyecta en el navegador con 7 (alrededor de 1 cm). El plan decía 43 KB y bajaban unos 87: el editor pasó a su propio fragmento.
+  15. T abría las obras, vacías: ahora abre Localidades si está prendida.
+
+  **Verificación rev25 (corrección, 15/11): NO APROBADO.** De los 15 hallazgos de rev24, 14 quedaron resueltos. El que faltaba: al cerrar la tabla con T teniendo el foco adentro, el foco iba al body (con la ✕ ya volvía al botón).
+  - Ahora, al cerrar la tabla de cualquier forma, el foco vuelve al botón de la tabla. La batería lo comprueba.
+  - De paso, «Solo lo que se ve» se recalcula también al plegar o desplegar las capas o el inspector.
+  - Anotado para después (baja): el rectángulo libre deja afuera la franja de mapa debajo del inspector, a la derecha de la tabla.
+
+  **Verificación rev26 (corrección, 15/11): APROBADO.**
+  - T cierra la tabla desde cualquier control y el foco vuelve al botón de la tabla, en los tres tamaños. Si el foco estaba afuera, no se mueve.
+  - «Solo lo que se ve» se recalcula al plegar o desplegar las capas y el inspector.
+  - Batería sin fallas.
+
+  Anotado para después (baja, no bloquea):
+  - Con el foco en un botón del editor de obras, T no cierra la tabla: `escribiendoEn` cuenta todo el `form`. Esc sí cierra el editor.
+  - Al abrir el editor, la tabla se agranda al instante y los botones de zoom tardan unos 0,4 s en subir. En ese lapso tapan la esquina de Exportar. Convendría animar los dos con la misma curva.
 - [ ] **T5 · Animación de distancia** — `aprobado`
   - La franja alrededor de la ruta crece de 0 a 20 km mientras un contador suma localidades y habitantes en vivo, con los mismos números que el tablero (refinamiento geodésico).
   - Bloqueado por: T1.

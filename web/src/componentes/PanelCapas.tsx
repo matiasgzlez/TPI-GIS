@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useState } from 'react';
 import { Switch } from '@heroui/react';
-import { ArrowCounterClockwise, CaretDown, Eye, EyeSlash, ListBullets, MagnifyingGlass, SidebarSimple, X } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, CaretDown, Eye, EyeSlash, ListBullets, MagnifyingGlass, SidebarSimple, Table, X } from '@phosphor-icons/react';
 import { miniatura } from '../interfaz';
 import { AnimatePresence, motion } from 'motion/react';
 import { unByKey } from 'ol/Observable';
@@ -8,6 +8,7 @@ import { CAPAS, CONJUNTOS, GRUPOS, type Geometria } from '../config';
 import { normalizar, SINONIMOS } from '../comandos';
 import { RESORTE_PANEL } from '../movimiento';
 import { escalaMinima } from '../estilos';
+import { SelectorCalor, LeyendaCalor, admiteCalor } from './Calor';
 import { acercarAEscala, cambiarCapas, cambiarOpacidad, cargarLeyenda, denominadorWms, ponerCapas, restablecerCapas, suscribirCapas, verSolo, type Visor } from '../visor';
 
 interface Props {
@@ -16,11 +17,14 @@ interface Props {
   plegable: boolean;
   // Modo profesional: pliega la barra lateral entera.
   onPlegar?: () => void;
+  // Modo profesional: abre la tabla de datos de la capa (T4).
+  onTabla?: (nombre: string) => void;
+  tablaAbierta?: string | null;
 }
 
 // Grupos plegables con un switch por grupo y uno por capa. Minimalista: los grupos arrancan cerrados
 // y dicen en una línea qué tienen prendido; la leyenda y los ajustes de cada capa se abren a pedido.
-export default function PanelCapas({ visor, plegable, onPlegar }: Props) {
+export default function PanelCapas({ visor, plegable, onPlegar, onTabla, tablaAbierta }: Props) {
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
   const [abiertos, setAbiertos] = useState<Set<string>>(() => new Set());
   // Grupos que alguna vez se abrieron: los cerrados no montan sus filas (ni piden sus miniaturas).
@@ -187,7 +191,7 @@ export default function PanelCapas({ visor, plegable, onPlegar }: Props) {
                               <Switch.Control><Switch.Thumb /></Switch.Control>
                             </Switch.Content>
                           </Switch>
-                          {visible && ocultas.has(capa.nombre) && (
+                          {visible && ocultas.has(capa.nombre) && !visor.calor.has(capa.nombre) && (
                             <p className="-mt-1 mb-1.5 pl-[104px] pr-4 text-[13px] text-[var(--tinta-3)]">
                               Aparece al acercarse.{' '}
                               <button
@@ -200,15 +204,30 @@ export default function PanelCapas({ visor, plegable, onPlegar }: Props) {
                             </p>
                           )}
                           {visible && (
+                            <div className="-mt-1 mb-1 ml-[100px] flex flex-wrap items-center gap-2 pr-3">
                             <button
                               type="button"
                               onClick={() => setAjustando(ajustando === capa.nombre ? null : capa.nombre)}
                               aria-expanded={ajustando === capa.nombre}
                               aria-label={`Leyenda y ajustes de ${capa.titulo}`}
-                              className={`-mt-1 mb-1 ml-[100px] flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12.5px] font-medium transition-colors ${ajustando === capa.nombre ? 'bg-[var(--superficie-3)] text-[var(--tinta)]' : 'text-[var(--tinta-3)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]'}`}
+                              className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12.5px] font-medium transition-colors ${ajustando === capa.nombre ? 'bg-[var(--superficie-3)] text-[var(--tinta)]' : 'text-[var(--tinta-3)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]'}`}
                             >
                               <ListBullets size={14} /> Leyenda y ajustes
                             </button>
+                            {onTabla && (
+                              <button
+                                type="button"
+                                onClick={() => onTabla(capa.nombre)}
+                                aria-pressed={tablaAbierta === capa.nombre}
+                                aria-label={`Tabla de datos de ${capa.titulo}`}
+                                className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12.5px] font-medium transition-colors ${tablaAbierta === capa.nombre ? 'bg-[var(--superficie-3)] text-[var(--tinta)]' : 'text-[var(--tinta-3)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]'}`}
+                              >
+                                <Table size={14} /> Tabla
+                              </button>
+                            )}
+                            {/* Capas de puntos: verlas como puntos o como mapa de calor (T3). */}
+                            {admiteCalor(capa.nombre) && <SelectorCalor visor={visor} nombre={capa.nombre} titulo={capa.titulo} />}
+                            </div>
                           )}
                           <AnimatePresence initial={false}>
                             {visible && ajustando === capa.nombre && (
@@ -219,7 +238,9 @@ export default function PanelCapas({ visor, plegable, onPlegar }: Props) {
                                 transition={RESORTE_PANEL}
                                 className="overflow-hidden"
                               >
-                                <Leyenda nombre={capa.nombre} titulo={capa.titulo} />
+                                {visor.calor.has(capa.nombre)
+                                  ? <LeyendaCalor visor={visor} nombre={capa.nombre} simple={false} className="mb-2 ml-[104px] mt-1 pr-4" />
+                                  : <Leyenda nombre={capa.nombre} titulo={capa.titulo} />}
                                 <Ajustes visor={visor} nombre={capa.nombre} />
                               </motion.div>
                             )}

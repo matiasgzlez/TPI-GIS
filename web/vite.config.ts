@@ -24,7 +24,8 @@ export default defineConfig(({ mode }) => {
           // Bibliotecas en partes propias: cambian poco y el navegador las cachea entre versiones del visor.
           advancedChunks: {
             groups: [
-              { name: 'openlayers', test: /node_modules[\\/]ol[\\/]/ },
+              // OpenLayers sin grupo propio: con un grupo fijo, el empaquetador metía en él también el WebGL
+              // del mapa de calor (T3), que solo usa una parte diferida, y se bajaba al abrir el visor.
               { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
             ],
           },

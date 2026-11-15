@@ -263,8 +263,11 @@ function agrandarSld(xml: string) {
 // tesela en lugar de una por capa, y resuelve juntos los rótulos de todas las capas.
 // `sinRotulos`: capas cuyos rótulos se callan (las reglas "Rótulo de …"). Con el tablero abierto los
 // nombres de localidades los pinta el visor junto a las burbujas: los del WMS quedaban tapados por ellas.
-export const sldDeCapas = (nombres: string[], sinRotulos: ReadonlySet<string> = new Set()) =>
-  agrandarSld(sld(nombres.map(n => capa(n, sinRotulos.has(n) ? REGLAS[n]?.filter(r => !r.titulo.startsWith('Rótulo')) : REGLAS[n])).join('')));
+// `sinEscala`: capas que se consultan sin las reglas de escala (las que se ven como mapa de calor: la
+// mancha muestra todos sus puntos a cualquier escala, así que la consulta también los encuentra).
+const PUNTO_CONSULTA: Regla[] = [{ titulo: 'Punto', simbolo: punto('#000000', 8) }];
+export const sldDeCapas = (nombres: string[], sinRotulos: ReadonlySet<string> = new Set(), sinEscala: ReadonlySet<string> = new Set()) =>
+  agrandarSld(sld(nombres.map(n => capa(n, sinEscala.has(n) ? PUNTO_CONSULTA : sinRotulos.has(n) ? REGLAS[n]?.filter(r => !r.titulo.startsWith('Rótulo')) : REGLAS[n])).join('')));
 
 // Modo simple: los títulos de la leyenda con palabras de todos los días (mismos símbolos y colores).
 const TITULOS_SIMPLES: Record<string, string> = {

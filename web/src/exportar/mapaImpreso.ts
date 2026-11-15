@@ -72,12 +72,14 @@ export async function dibujarMapa(visor: Visor, anchoMm: number, altoMm: number,
   const destino = document.createElement('div');
   Object.assign(destino.style, { position: 'fixed', left: '-20000px', top: '0', width: `${ancho}px`, height: `${alto}px` });
   document.body.appendChild(destino);
-  const capas = capasParaImprimir(visor);
+  // El marco de la hoja en EPSG:3857 (para que los mapas de calor pidan sus puntos).
+  const marco = [centro[0] - (ancho / 2) * resolucion, centro[1] - (alto / 2) * resolucion, centro[0] + (ancho / 2) * resolucion, centro[1] + (alto / 2) * resolucion];
+  const capas = await capasParaImprimir(visor, marco);
   // Teselas pedidas, cargadas y fallidas: si GeoServer rechaza o se cuelga, la hoja no sale con el
   // mapa vacío.
   let pedidas = 0; let cargadas = 0; let fallidas = 0;
   for (const capa of capas) {
-    if (!(capa instanceof TileLayer)) continue;
+    if (!(capa instanceof TileLayer)) continue; // los grupos del calor ya se cargaron antes
     capa.getSource()!.on('tileloadstart', () => pedidas++);
     capa.getSource()!.on('tileloadend', () => cargadas++);
     capa.getSource()!.on('tileloaderror', () => fallidas++);

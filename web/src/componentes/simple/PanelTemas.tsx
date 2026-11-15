@@ -11,6 +11,8 @@ import { IconoTematica } from './iconos';
 // "¿Qué querés ver?": el panel de capas del modo simple. Primero las temáticas, cada una con un dibujo
 // y la miniatura de lo que trae; al tocar una, sus capas como tarjetas con miniatura, nombre de todos
 // los días y una frase. Un toque prende o apaga. Nada de "capa", "entidad" ni nombres del IGN.
+import { BotonManchas, LeyendaCalor, TarjetaDondeViveLaGente, admiteCalor } from '../Calor';
+
 export default function PanelTemas({ visor }: { visor: Visor }) {
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
   const [abierta, setAbierta] = useState<Tematica | null>(null);
@@ -48,6 +50,10 @@ export default function PanelTemas({ visor }: { visor: Visor }) {
               </div>
             </header>
             <ul className="desplazable grid min-h-0 flex-1 grid-cols-2 gap-2.5 overflow-y-auto px-4 pb-4">
+              {/* T3: lo primero, a todo el ancho: dónde vive la gente, como manchas. */}
+              <motion.li className="col-span-2" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={RESORTE}>
+                <TarjetaDondeViveLaGente visor={visor} />
+              </motion.li>
               {TEMATICAS.map((t, i) => {
                 const prendidas = t.capas.filter(c => visor.visibles.has(c.nombre)).length;
                 return (
@@ -154,7 +160,7 @@ function Tematica({ visor, tematica, ocultas, onVolver }: { visor: Visor; temati
                   <Check size={16} weight="bold" />
                 </span>
               </button>
-              {visible && ocultas.has(capa.nombre) && (
+              {visible && ocultas.has(capa.nombre) && !visor.calor.has(capa.nombre) && (
                 <button
                   type="button"
                   onClick={() => acercarAEscala(visor, escalaMinima(capa.nombre)!)}
@@ -163,7 +169,10 @@ function Tematica({ visor, tematica, ocultas, onVolver }: { visor: Visor; temati
                   <MagnifyingGlassPlus size={17} weight="bold" /> Se ve de más cerca: acercarme
                 </button>
               )}
-              {visible && <Referencias nombre={capa.nombre} titulo={capa.titulo} />}
+              {visible && admiteCalor(capa.nombre) && <BotonManchas visor={visor} nombre={capa.nombre} />}
+              {visible && (visor.calor.has(capa.nombre)
+                ? <LeyendaCalor visor={visor} nombre={capa.nombre} simple className="px-3.5 pb-1 pt-2" />
+                : <Referencias nombre={capa.nombre} titulo={capa.titulo} />)}
             </motion.li>
           );
         })}

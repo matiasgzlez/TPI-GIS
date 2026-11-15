@@ -15,11 +15,13 @@ const ROTULOS: Record<string, string> = {
   escala: 'Escala', fuente: 'Fuente', nro_ruta: 'N.º de ruta', administra: 'Administración', situacin: 'Situación',
   tipo_obra: 'Tipo de obra', prioridad: 'Prioridad', descripcion: 'Descripción', regimen: 'Régimen', navegable: 'Navegable',
   revestimie: 'Revestimiento', carriles: 'Carriles', trfico: 'Tránsito', estado: 'Estado', prov: 'Código',
+  situacion: 'Situación', trafico: 'Tránsito', categoria: 'Categoría', km_inicial: 'Km inicial', de_carga: 'De carga',
+  fecha_relevamiento: 'Fecha de relevamiento', codloc: 'Código de localidad', coddepto: 'Código de departamento', nombre: 'Nombre',
 };
 export const rotulo = (campo: string) => ROTULOS[campo] ?? campo.charAt(0).toUpperCase() + campo.slice(1).replaceAll('_', ' ');
 
 // Los datos que más dicen, en el orden en que se leen. Lo demás queda en "ver más".
-const CLAVE = ['distancia', 'tipo', 'canthab', 'departamen', 'provincia', 'nro_ruta', 'administra', 'revestimie', 'regimen', 'tipo_obra', 'prioridad', 'descripcion'];
+export const CLAVE = ['distancia', 'tipo', 'canthab', 'departamen', 'provincia', 'nro_ruta', 'administra', 'revestimie', 'regimen', 'tipo_obra', 'prioridad', 'descripcion'];
 
 export function datosClave(atributos: [string, string][], maximo = 3): [string, string][] {
   const nombre = nombreDe(atributos);

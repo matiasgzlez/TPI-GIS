@@ -19,6 +19,8 @@ interface Props {
   // Debajo del error: qué hacer (en el modo simple, sin jerga).
   explicacion?: string;
   onReintentar?: () => void;
+  // Otra salida en vez de "Reintentar" (p. ej. "Ver más cerca" cuando la mancha tiene demasiados puntos).
+  accion?: { texto: string; icono: React.ReactNode; alElegir: () => void } | null;
   // Avisa qué página se está viendo (la pastilla de arriba dice su orientación).
   onPagina?: (pagina: number) => void;
   // Avisa qué PDF terminó de dibujarse (la descarga espera a que se vea) y si pdf.js no pudo.
@@ -49,7 +51,7 @@ async function dibujar(doc: PDFDocumentProxy, numero: number, ancho: number) {
   return { lienzo, proporcion: base.height / base.width };
 }
 
-export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explicacion, onReintentar, onPagina, onDibujada, onErrorVista, conMiniaturas, proporcionInicial }: Props) {
+export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explicacion, onReintentar, accion, onPagina, onDibujada, onErrorVista, conMiniaturas, proporcionInicial }: Props) {
   const mesa = useRef<HTMLDivElement>(null);
   const lienzo = useRef<HTMLCanvasElement>(null);
   const actual = useRef<PDFDocumentProxy | null>(null);
@@ -288,7 +290,11 @@ export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explic
                 <span className="grid size-12 place-items-center rounded-2xl bg-[var(--danger)]/10 text-[var(--danger)]"><WarningCircle size={26} weight="bold" /></span>
                 <p className="text-[17px] font-semibold leading-snug text-[#15171a]">{error}</p>
                 {explicacion && <p className="text-[14px] leading-snug text-[#5e646b]">{explicacion}</p>}
-                {onReintentar && (
+                {accion ? (
+                  <button type="button" onClick={accion.alElegir} className="mt-1 flex h-11 items-center gap-2 rounded-full bg-[#15171a] px-5 text-[15px] font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15171a]">
+                    {accion.icono} {accion.texto}
+                  </button>
+                ) : onReintentar && (
                   <button type="button" onClick={onReintentar} className="mt-1 flex h-11 items-center gap-2 rounded-full bg-[#15171a] px-5 text-[15px] font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15171a]">
                     <ArrowClockwise size={17} weight="bold" /> Reintentar
                   </button>

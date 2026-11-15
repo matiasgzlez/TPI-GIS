@@ -21,6 +21,9 @@ import { escalaActual, factorPantalla, movimientoReducido } from './preferencias
 import { CAPAS, EXTENSION_CHACO, URL_WMS } from './config';
 import { claveRuta, type Ruta, type Traza } from './analisisRuta';
 import { CAPITALES, PROVINCIAS } from './provincias';
+import type Heatmap from 'ol/layer/Heatmap';
+import type LayerGroup from 'ol/layer/Group';
+import { calorDe } from './calor';
 
 // Todo lo que las herramientas y los paneles necesitan del mapa.
 export interface Visor {
@@ -49,6 +52,9 @@ export interface Visor {
   capitales: VectorLayer<VectorSource>;
   // Capas cuyos rótulos del WMS se callan (con el tablero abierto, localidades: los pinta el visor).
   sinRotulos: Set<string>;
+  // Capas de puntos vistas como mapa de calor (T3): salen del WMS y se dibujan como manchas. null: el
+  // calor ya está elegido y su capa (con WebGL, carga diferida) todavía está en camino.
+  calor: globalThis.Map<string, LayerGroup | null>;
 }
 
 // Orden de dibujo: provincias y países abajo, después polígonos, líneas, puntos y las obras arriba.
@@ -412,9 +418,18 @@ export function crearVisor(destino: HTMLElement): Visor {
     mapa.render();
   });
 
-  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula, rotulos, capitales, sinRotulos: new Set() };
+  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula, rotulos, capitales, sinRotulos: new Set(), calor: new globalThis.Map() };
   actualizarWms(visor);
+  // Mapa de calor: cuando el mapa se queda quieto, se piden los puntos de lo que se ve.
+  mapa.on('moveend', () => cargarCalor(visor));
   return visor;
+}
+
+// Pide los puntos de lo que se ve para cada capa en calor (si ya están, no pide nada).
+export function cargarCalor(visor: Visor, forzar = false) {
+  if (!visor.calor.size) return;
+  const extension = visor.mapa.getView().calculateExtent(visor.mapa.getSize());
+  for (const nombre of visor.calor.keys()) calorDe(nombre).cargar(extension, forzar);
 }
 
 // La entidad seleccionada late: un anillo (o un halo en líneas y polígonos) que se expande y se
@@ -472,15 +487,48 @@ export function ponerCapas(visor: Visor, nombres: string[]) {
   actualizarWms(visor);
 }
 
+// Ver una capa de puntos como mapa de calor (o volver a verla como puntos). Prenderla en calor la
+// prende también como capa.
+// El calor queda elegido en el momento (la interfaz responde y el WMS deja de dibujar esos puntos); la
+// capa, con WebGL, se agrega cuando termina de bajar su módulo.
+export function cambiarCalor(visor: Visor, nombre: string, activo: boolean) {
+  const elegido = visor.calor.has(nombre);
+  if (activo && !elegido) {
+    visor.visibles.add(nombre);
+    visor.calor.set(nombre, null);
+    calorDe(nombre).cargar(visor.mapa.getView().calculateExtent(visor.mapa.getSize()));
+    import('./capaCalor').then(({ crearCapaCalor }) => {
+      // Si mientras tanto se volvió a puntos (o se apagó), no se agrega.
+      if (!visor.calor.has(nombre) || visor.calor.get(nombre)) return;
+      const capa = crearCapaCalor(nombre, calorDe(nombre).fuente, factorPantalla());
+      (capa.get('mancha') as Heatmap).setOpacity(0.88 * (visor.opacidades[nombre] ?? 1));
+      visor.calor.set(nombre, capa);
+      visor.mapa.addLayer(capa);
+      visor.suscriptores.forEach(aviso => aviso());
+    });
+  } else if (!activo && elegido) {
+    const capa = visor.calor.get(nombre);
+    if (capa) visor.mapa.removeLayer(capa);
+    visor.calor.delete(nombre);
+  }
+  actualizarWms(visor);
+}
+
 export function cambiarOpacidad(visor: Visor, nombre: string, opacidad: number) {
   if (opacidad >= 0.99) delete visor.opacidades[nombre];
   else visor.opacidades[nombre] = opacidad;
+  // En calor, la opacidad es la de la mancha.
+  (visor.calor.get(nombre)?.get('mancha') as Heatmap | undefined)?.setOpacity(0.88 * opacidad);
   actualizarWms(visor);
 }
 
 function actualizarWms(visor: Visor) {
   const nombres = capasVisibles(visor);
-  const combinadas = nombres.filter(n => visor.opacidades[n] === undefined);
+  // Una capa vista como calor no se pide al WMS: sus puntos no se dibujan debajo de las manchas.
+  for (const [nombre, capa] of visor.calor) {
+    if (!visor.visibles.has(nombre)) { if (capa) visor.mapa.removeLayer(capa); visor.calor.delete(nombre); }
+  }
+  const combinadas = nombres.filter(n => visor.opacidades[n] === undefined && !visor.calor.has(n));
   visor.wms.setVisible(combinadas.length > 0);
   visor.rotulos.setVisible(visor.visibles.has('provincias'));
   // Con el tablero abierto los nombres de localidades los pinta su capa: las capitales también callan.
@@ -489,14 +537,14 @@ function actualizarWms(visor: Visor) {
 
   // Las sueltas se dibujan arriba de la combinada, en su orden de dibujo entre ellas.
   for (const [nombre, capa] of Object.entries(visor.sueltas)) {
-    if (!visor.visibles.has(nombre) || visor.opacidades[nombre] === undefined) {
+    if (!visor.visibles.has(nombre) || visor.opacidades[nombre] === undefined || visor.calor.has(nombre)) {
       visor.mapa.removeLayer(capa);
       delete visor.sueltas[nombre];
     }
   }
   nombres.forEach((nombre, i) => {
     const opacidad = visor.opacidades[nombre];
-    if (opacidad === undefined) return;
+    if (opacidad === undefined || visor.calor.has(nombre)) return;
     let capa = visor.sueltas[nombre];
     if (!capa) {
       capa = crearCapaWms();
@@ -527,7 +575,7 @@ export async function consultarPuntoWms(visor: Visor, coordenada: Coordinate, no
   const url = fuenteConsulta.getFeatureInfoUrl(coordenada, visor.mapa.getView().getResolution()!, 'EPSG:3857', {
     LAYERS: capas, QUERY_LAYERS: capas, INFO_FORMAT: 'application/json', FEATURE_COUNT: maximo,
   })!;
-  const respuesta = await fetch(url, { method: 'POST', body: new URLSearchParams({ SLD_BODY: sldDeCapas(nombres, visor.sinRotulos) }), signal: señal });
+  const respuesta = await fetch(url, { method: 'POST', body: new URLSearchParams({ SLD_BODY: sldDeCapas(nombres, visor.sinRotulos, new Set(visor.calor.keys())) }), signal: señal });
   const texto = await respuesta.text();
   if (!respuesta.ok || texto.startsWith('<')) throw new Error('GeoServer no pudo responder la consulta.');
   return JSON.parse(texto) as { features: { id: string; properties: Record<string, unknown> }[] };
@@ -556,6 +604,9 @@ export function aplicarTema(visor: Visor) {
   visor.cuadricula = crearCuadricula();
   capas.setAt(indice, visor.cuadricula);
   visor.mapa.getAllLayers().forEach(c => c.changed());
+  // Las manchas cambian de rampa (en oscuro, hacia los claros).
+  const grupos = [...visor.calor.values()].filter((g): g is LayerGroup => !!g);
+  if (grupos.length) import('./capaCalor').then(({ aplicarTemaCalor }) => grupos.forEach(aplicarTemaCalor));
 }
 
 // Leyenda de GeoServer. En tema oscuro se invierte por CSS igual que el mapa (.leyenda-wms).
@@ -647,10 +698,13 @@ const DISPOSICIONES: Record<'simple' | 'pro', { base: Margenes; conPanel: number
 let disposicion: 'simple' | 'pro' = 'pro';
 let lateralPlegado = false;
 let inspectorPlegado = false;
-export function ponerDisposicion(interfaz: 'simple' | 'pro', plegado = false, sinInspector = false) {
+let altoTablaAbierta = 0;
+// `altoTabla`: la tabla de datos del profesional (T4) tapa el borde de abajo del mapa.
+export function ponerDisposicion(interfaz: 'simple' | 'pro', plegado = false, sinInspector = false, altoTabla = 0) {
   disposicion = interfaz;
   lateralPlegado = plegado;
   inspectorPlegado = sinInspector;
+  altoTablaAbierta = altoTabla;
 }
 
 function margenesMapa(conPanel = false): Margenes {
@@ -659,7 +713,8 @@ function margenesMapa(conPanel = false): Margenes {
   const escala = escalaActual();
   const { base, conPanel: derecha } = DISPOSICIONES[disposicion];
   const margenDerecho = disposicion === 'pro' && inspectorPlegado ? 40 : base[1];
-  const margenes: Margenes = [base[0], conPanel ? Math.max(margenDerecho, derecha) : margenDerecho, base[2], disposicion === 'pro' && lateralPlegado ? 96 : base[3]];
+  const abajo = disposicion === 'pro' && altoTablaAbierta ? base[2] + altoTablaAbierta : base[2];
+  const margenes: Margenes = [base[0], conPanel ? Math.max(margenDerecho, derecha) : margenDerecho, abajo, disposicion === 'pro' && lateralPlegado ? 96 : base[3]];
   return margenes.map(m => Math.round(m * escala)) as Margenes;
 }
 
@@ -735,14 +790,28 @@ function capaWmsImpresion(nombres: string[], sinRotulos: ReadonlySet<string>, op
 
 // Las capas de la hoja: las mismas que se ven (WMS combinado, las que tienen opacidad propia y las
 // capas del visor, con sus fuentes compartidas), sin la cuadrícula de pantalla: la hoja dibuja la suya.
-export function capasParaImprimir(visor: Visor) {
+// `extension`: el marco de la hoja. Los mapas de calor piden sus puntos para ese encuadre (con su propio
+// control: no le cambian los datos al mapa); si no se pueden traer todos, es error (la hoja no sale con
+// una mancha incompleta).
+export async function capasParaImprimir(visor: Visor, extension: number[]) {
   const nombres = capasVisibles(visor);
-  const combinadas = nombres.filter(n => visor.opacidades[n] === undefined);
-  const capas: (TileLayer<TileWMS> | VectorLayer<VectorSource>)[] = [];
+  const combinadas = nombres.filter(n => visor.opacidades[n] === undefined && !visor.calor.has(n));
+  const capas: (TileLayer<TileWMS> | VectorLayer<VectorSource> | LayerGroup)[] = [];
+  if (visor.calor.size) {
+    const { crearCapaCalor } = await import('./capaCalor');
+    for (const nombre of visor.calor.keys()) {
+      const control = calorDe(nombre, 'impresion');
+      const estado = await control.cargar(extension, true);
+      if (estado.fase !== 'lista') throw new Error(`calor:${nombre}:${estado.fase}`);
+      const grupo = crearCapaCalor(nombre, control.fuente, 1, true);
+      (grupo.get('mancha') as Heatmap).setOpacity(0.88 * (visor.opacidades[nombre] ?? 1));
+      capas.push(grupo);
+    }
+  }
   if (combinadas.length) capas.push(capaWmsImpresion(combinadas, visor.sinRotulos));
   nombres.forEach((nombre, i) => {
     const opacidad = visor.opacidades[nombre];
-    if (opacidad === undefined) return;
+    if (opacidad === undefined || visor.calor.has(nombre)) return;
     const capa = capaWmsImpresion([nombre], visor.sinRotulos, opacidad);
     capa.setZIndex(10 + (i + 1) / (nombres.length + 1));
     capas.push(capa);

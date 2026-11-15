@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Toast, toast } from '@heroui/react';
-import { CornersOut, FilePdf, GearSix, ListBullets, Minus, Moon, Plus, Question, Stack, Sun, X } from '@phosphor-icons/react';
+import { CornersOut, FilePdf, GearSix, ListBullets, Minus, Moon, Plus, Question, Stack, Sun, Table as IconoTabla, X } from '@phosphor-icons/react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
@@ -32,8 +32,9 @@ import { guardarObra, type DatosObra } from './obras';
 import { useTema } from './tema';
 import { usePreferencias } from './preferencias';
 import { RESORTE_PANEL } from './movimiento';
-import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, crearVisor, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
+import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, capasVisibles, crearVisor, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
 import { tituloProvincia } from './provincias';
+import { AvisoCalor } from './componentes/Calor';
 import type { Contenido } from './exportar/pdf';
 
 // Se cargan recién cuando hacen falta: el formulario trae Select, TextArea y el botón animado.
@@ -45,6 +46,7 @@ const Bienvenida = lazy(() => import('./componentes/Bienvenida'));
 const Guia = lazy(() => import('./componentes/simple/Guia'));
 // Imprimir / exportar a PDF: jsPDF, pdf.js y la letra incrustada se cargan solo al abrirlo.
 const Imprimir = lazy(() => import('./exportar/Imprimir'));
+const TablaDatos = lazy(() => import('./componentes/pro/TablaDatos'));
 
 const retraso = (ms: number) => ({ '--retraso': `${ms}ms` }) as React.CSSProperties;
 // Si la pantalla cumple una media query, atento a los cambios de tamaño.
@@ -87,6 +89,12 @@ export default function App() {
   const [plegado, setPlegado] = useState(false);
   const [pestana, setPestana] = useState<PestanaInspector>('informacion');
   const [temasAbierto, setTemasAbierto] = useState(false);
+  // Tabla de datos (T4, solo en el profesional): la capa abierta y si está agrandada. Su alto (medido) le
+  // corre el borde de abajo al encuadre del mapa y sube los botones de zoom.
+  const [tabla, setTabla] = useState<{ capa: string; amplia: boolean } | null>(null);
+  const [altoTabla, setAltoTabla] = useState(0);
+  const ultimaTabla = useRef<string | null>(null);
+  const [recargaObras, setRecargaObras] = useState(0);
   const modal = !preferencias.interfaz || guia || exportar;
   // Pro por debajo de 1440 px (la notebook de 1366): sin nada que mostrar, el inspector se pliega a un botón y le deja el lugar al mapa.
   const anchoAmplio = useMedia('(min-width: 1440px)');
@@ -94,7 +102,9 @@ export default function App() {
   const inspectorPlegado = interfaz === 'pro' && !anchoAmplio && !hayContenido && pestana === 'informacion';
 
   // El encuadre del mapa deja libres los bordes que tapa la interfaz a la vista.
-  useEffect(() => ponerDisposicion(interfaz, plegado, inspectorPlegado), [interfaz, plegado, inspectorPlegado]);
+  useEffect(() => ponerDisposicion(interfaz, plegado, inspectorPlegado, tabla ? altoTabla : 0), [interfaz, plegado, inspectorPlegado, tabla, altoTabla]);
+  // La tabla es del profesional: al pasar al simple se cierra.
+  useEffect(() => { if (interfaz !== 'pro') setTabla(null); }, [interfaz]);
   // En el profesional, un resultado nuevo o el tablero se muestran en "Información".
   useEffect(() => {
     if (resultados || tablero || obra) setPestana('informacion');
@@ -224,13 +234,33 @@ export default function App() {
       }
       if (escribiendo || e.metaKey || e.ctrlKey || e.altKey) return;
       // "P": exportar a PDF (imprimir, en el modo simple).
-      if (e.key.toLowerCase() === 'p') { setExportar(true); return; }
+      if (e.key.toLowerCase() === 'p') { e.preventDefault(); setExportar(true); return; } // sin escribir la «p» en el título
+      // "T": la tabla de datos (profesional), de la última capa abierta o de la de más arriba.
+      if (e.key.toLowerCase() === 't' && interfaz === 'pro' && !celular && visor) { e.preventDefault(); alternarTabla(); return; }
       const elegido = (Object.keys(HERRAMIENTAS) as Modo[]).find(m => HERRAMIENTAS[m].tecla === e.key);
       if (elegido) setModo(elegido);
     };
     window.addEventListener('keydown', alPresionar);
     return () => window.removeEventListener('keydown', alPresionar);
   });
+
+  function abrirTabla(capa: string) {
+    ultimaTabla.current = capa;
+    setTabla(t => ({ capa, amplia: t?.amplia ?? false }));
+  }
+  // Al cerrar la tabla con el foco adentro, el foco vuelve al botón de la tabla (si no, quedaba en el body).
+  function cerrarTabla() {
+    const adentro = !!document.activeElement?.closest('section[aria-label^="Tabla de datos:"]');
+    setTabla(null);
+    if (adentro) requestAnimationFrame(() => document.querySelector<HTMLElement>('button[aria-label="Tabla de datos (T)"]')?.focus());
+  }
+  function alternarTabla() {
+    if (tabla) { cerrarTabla(); return; }
+    const capas = visor ? [...capasVisibles(visor)].reverse() : [];
+    // La última que se abrió; si no, Localidades (si está prendida) o la primera con datos de verdad: las
+    // obras arrancan vacías y la primera impresión era una tabla vacía.
+    abrirTabla(ultimaTabla.current ?? (capas.includes('localidades') ? 'localidades' : capas.find(c => c !== 'provincias' && c !== 'obras_rn11') ?? 'localidades'));
+  }
 
   function cerrarResultados() {
     setResultados(null);
@@ -244,6 +274,8 @@ export default function App() {
     try {
       const id = await guardarObra(obra!, datos);
       refrescarMapa(visor!);
+      // La tabla de obras (si está abierta) vuelve a pedir: la obra nueva aparece sin tocar nada.
+      setRecargaObras(n => n + 1);
       if (interfaz === 'simple') toast.success('¡Listo! Guardamos la obra', { description: 'Ya aparece en el mapa.' });
       else toast.success('Obra guardada', { description: `GeoServer la registró como ${id}.` });
       // Deja ver el tilde del botón antes de cerrar la tarjeta.
@@ -507,6 +539,12 @@ export default function App() {
         <InterfazContexto.Provider value={interfaz}>
         <MotionConfig reducedMotion={preferencias.movimientoReducido ? 'always' : 'user'}>
         <div className="interfaz" data-interfaz={interfaz} inert={modal}>
+          {/* Mapa de calor (T3): si una mancha necesita acercarse o no se pudo traer, se avisa sobre el mapa. */}
+          {visor && (
+            <div className="pointer-events-none absolute inset-x-0 top-[92px] z-20 flex justify-center px-4 max-lg:top-[150px]">
+              <AvisoCalor visor={visor} onAcercar={() => zoom(1)} />
+            </div>
+          )}
           {interfaz === 'simple' ? (
             <>
               {/* Simple: buscador grande arriba, "¿Qué querés ver?" a la izquierda, botones grandes abajo. */}
@@ -600,6 +638,7 @@ export default function App() {
                 <div className="entra pointer-events-auto" style={retraso(200)}><BarraHerramientas modo={modo} onModo={setModo} /></div>
                 <div className="entra pointer-events-auto flex items-center gap-2" style={retraso(260)}>
                   <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} angosto />
+                  <BotonRedondo etiqueta={tabla ? 'Cerrar la tabla de datos (T)' : 'Tabla de datos (T)'} onPress={alternarTabla} compacto activo={!!tabla}><IconoTabla size={21} weight="bold" /></BotonRedondo>
                   <BotonRedondo etiqueta="Exportar a PDF" onPress={() => setExportar(e => !e)} compacto><FilePdf size={21} weight="bold" /></BotonRedondo>
                   {interruptor}
                   {botonesTema(true)}
@@ -634,7 +673,7 @@ export default function App() {
                       exit={{ opacity: 0, x: -16 }}
                       transition={RESORTE_PANEL}
                     >
-                      <PanelCapas visor={visor} plegable={false} onPlegar={() => setPlegado(true)} />
+                      <PanelCapas visor={visor} plegable={false} onPlegar={() => setPlegado(true)} onTabla={abrirTabla} tablaAbierta={tabla?.capa ?? null} />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -673,7 +712,45 @@ export default function App() {
                 )}
               </AnimatePresence>
 
-              <div className={`pointer-events-none absolute bottom-[68px] z-10 flex items-end gap-3 ${inspectorPlegado ? 'right-3' : 'right-[408px]'}`}>
+              {/* La tabla de datos: un cajón entre las capas y el inspector, sobre la barra de estado. */}
+              <AnimatePresence>
+                {tabla && (
+                  <motion.div
+                    key="tabla"
+                    ref={el => {
+                      if (!el) return;
+                      const medir = () => setAltoTabla(el.offsetHeight);
+                      const o = new ResizeObserver(medir);
+                      o.observe(el);
+                      medir();
+                      return () => { o.disconnect(); setAltoTabla(0); };
+                    }}
+                    initial={{ opacity: 0, y: 28 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 28 }}
+                    transition={RESORTE_PANEL}
+                    className="pointer-events-auto absolute bottom-[68px] z-10 flex flex-col"
+                    style={{ left: plegado ? 80 : 340, right: inspectorPlegado ? 12 : 416, height: tabla.amplia ? 'calc((100% - 164px) * 0.68)' : 'max(calc((100% - 164px) * 0.42), min(320px, calc(100% - 300px)))', transition: 'height .45s var(--ios), left .3s, right .3s' }}
+                  >
+                    <Suspense fallback={<div className="panel h-full" />}>
+                      <TablaDatos
+                        visor={visor}
+                        capa={tabla.capa}
+                        onCapa={abrirTabla}
+                        amplia={tabla.amplia}
+                        onAmplia={amplia => setTabla(t => t && { ...t, amplia })}
+                        onCerrar={cerrarTabla}
+                        bordes={`${plegado}|${inspectorPlegado}`}
+                        onIrA={consulta => { setTablero(null); setResultados({ tipo: 'consulta', consulta }); }}
+                        onLimpiar={cerrarResultados}
+                        recargaObras={recargaObras}
+                      />
+                    </Suspense>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className={`pointer-events-none absolute z-10 flex items-end gap-3 transition-[bottom] duration-300 ${inspectorPlegado ? 'right-3' : 'right-[408px]'}`} style={{ bottom: 68 + (tabla ? altoTabla + 12 : 0) }}>
                 <div className="entra" style={retraso(420)}>{zoomBotones()}</div>
                 {preferencias.minimapa && <div className="entra pointer-events-auto" style={retraso(480)}><Minimapa visor={visor} /></div>}
               </div>
@@ -836,14 +913,15 @@ function BotonRuta({ estado, onPress, angosto, soloEscudo }: { estado: EstadoRut
   );
 }
 
-function BotonRedondo({ etiqueta, onPress, compacto, children }: { etiqueta: string; onPress: () => void; compacto?: boolean; children: React.ReactNode }) {
+function BotonRedondo({ etiqueta, onPress, compacto, activo, children }: { etiqueta: string; onPress: () => void; compacto?: boolean; activo?: boolean; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onPress}
       aria-label={etiqueta}
       title={etiqueta}
-      className={`panel grid shrink-0 place-items-center text-[var(--tinta-2)] transition-colors hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2 ${compacto ? 'size-12' : 'size-[60px]'}`}
+      aria-pressed={activo}
+      className={`panel grid shrink-0 place-items-center transition-colors focus-visible:outline-2 ${activo ? '!bg-[var(--tinta)] text-[var(--superficie)]' : 'text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]'} ${compacto ? 'size-12' : 'size-[60px]'}`}
     >
       {children}
     </button>

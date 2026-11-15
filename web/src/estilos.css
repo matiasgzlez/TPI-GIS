@@ -280,3 +280,19 @@ input, textarea { caret-color: var(--vial); }
 
 /* La escala gráfica nunca se parte en dos renglones ("20 / km") en la fila compacta del celular. */
 .escala .ol-scale-line-inner { white-space: nowrap; }
+
+/* Mapa de calor (T3): las manchas de la tarjeta "¿Dónde vive la gente?" laten despacio cuando está activa.
+   Con movimiento reducido, quietas: la regla general (animaciones de 1 ms) hacía que una animación
+   infinita saltara de fase en cada cuadro, un parpadeo. */
+@keyframes latir {
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.14); opacity: 1; }
+}
+/* Tabla de datos (T4): las pestañas de capa se desvanecen en los bordes, señal de que hay más al desplazar. */
+.pestanas-tabla { mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 22px), transparent); }
+/* Tabla de datos (T4): filas de carga que respiran. */
+@keyframes respirar { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.esqueleto { animation: respirar 1.4s ease-in-out infinite; }
+.latido { animation: latir 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .latido, .esqueleto { animation: none !important; } }
+[data-movimiento="reducido"] .latido, [data-movimiento="reducido"] .esqueleto { animation: none !important; }

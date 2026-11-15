@@ -280,8 +280,17 @@ export function teclado(combo, entorno) {
     anotar('con Configuración, el Tab no sale de la hoja', await tabsDentro(30));
     await p.getByRole('radio', { name: /Cómo se usa|Manual/ }).first().click();
     const region = p.locator('[aria-label="Contenido de Configuración"]');
-    await region.focus(); await p.keyboard.press('End'); await pausa(400);
-    const desplazado = await region.evaluate(e => e.scrollHeight <= e.clientHeight || e.scrollTop + e.clientHeight >= e.scrollHeight - 2);
+    await region.focus(); await p.keyboard.press('End');
+    // El desplazamiento es suave: se espera a que llegue al final (o a que se quede quieto), no un tiempo fijo.
+    const desplazado = await region.evaluate(e => new Promise(listo => {
+      let ultimo = -1, quieto = 0; const t0 = performance.now();
+      const mirar = () => {
+        const fin = e.scrollHeight <= e.clientHeight || e.scrollTop + e.clientHeight >= e.scrollHeight - 2;
+        quieto = e.scrollTop === ultimo ? quieto + 1 : 0; ultimo = e.scrollTop;
+        if (fin || quieto > 20 || performance.now() - t0 > 4000) listo(fin); else requestAnimationFrame(mirar);
+      };
+      mirar();
+    }));
     anotar('el manual se recorre con el teclado hasta el final', desplazado);
     const v = await axe(p);
     anotar('axe sin violaciones (Configuración, manual)', v.length === 0, v.join(' · '));
@@ -539,5 +548,254 @@ export function exportarIntegridad(combo, entorno) {
     await ctx.unroute(/typeNames=tpi:localidades.*BBOX/);
     // Los pedidos que esta prueba corta a propósito dejan su error en la consola: no cuentan.
     registro.errores.splice(0, Infinity, ...registro.errores.filter(e => !/ERR_FAILED|Failed to load resource/.test(e)));
+  }, entorno, combo);
+}
+
+// --- Mapas de calor (T3) ---
+export function calor(combo, entorno) {
+  return envolver('calor', combo, async ({ p, anotar, informe, registro }) => {
+    const ctx = p.context();
+    const estado = nombre => p.evaluate(n => {
+      const v = window.__visor(); const g = v.calor.get(n); const m = g?.get('mancha');
+      return { activo: v.calor.has(n), puntos: m?.getSource().getFeatures().length ?? 0, enWms: (v.wms.getSource().get('sld') ?? '').includes(`<Name>${n}<`), visible: v.visibles.has(n), fase: m?.getSource().get('estado')?.fase ?? null };
+    }, nombre);
+    const conPuntos = n => p.waitForFunction(n => (window.__visor().calor.get(n)?.get('mancha')?.getSource().getFeatures().length ?? 0) > 0, n, { timeout: 30000 }).catch(() => {});
+    const ventana = () => p.getByRole('dialog', { name: /Imprimir el mapa|Exportar a PDF/ });
+
+    if (combo.modo === 'pro') {
+      await p.getByRole('button', { name: /^Límites y localidades/ }).first().click();
+      // El panel se está abriendo (animado): se confirma que el radio quedó elegido, y si no, se vuelve a tocar.
+      const radioCalor = p.getByRole('radiogroup', { name: /Ver Localidades como/ }).getByRole('radio', { name: 'Calor' });
+      await esperarQuietud(p).catch(() => {});
+      await radioCalor.click();
+      if (!await p.waitForFunction(() => window.__visor().calor.has('localidades'), null, { timeout: 3000 }).then(() => true).catch(() => false)) await radioCalor.click();
+      await conPuntos('localidades'); await esperarMapa(p);
+      const e = await estado('localidades');
+      anotar('Calor: la mancha de población carga sus puntos por WFS', e.activo && e.puntos > 0, `${e.puntos} localidades`);
+      anotar('Calor: el WMS deja de dibujar los puntos', !e.enWms);
+      await capturar(p, informe, entorno.salida, 'calor');
+      await p.getByRole('radio', { name: /^Leyenda$/ }).first().click().catch(() => p.getByRole('button', { name: /^Leyenda$/ }).first().click());
+      const leyenda = await p.waitForFunction(() => /Más habitantes/.test(document.body.innerText), null, { timeout: 5000 }).then(() => true).catch(() => false);
+      anotar('la leyenda explica la mancha (menos / más habitantes)', leyenda);
+      // La rampa de la leyenda sigue al tema (la del mapa cambia): en oscuro, el extremo alto es claro.
+      const rampaLeyenda = () => p.evaluate(() => [...document.querySelectorAll('[aria-hidden=true]')].map(e => e.style.background).find(b => /gradient/.test(b) && /252, 253, 191|59, 15, 112/.test(b)) ?? '');
+      const antesTema = await rampaLeyenda();
+      const botonTema = p.getByRole('button', { name: /^Tema (claro|oscuro)$/ }).first();
+      await botonTema.click(); await esperarMapa(p);
+      const despuesTema = await rampaLeyenda();
+      const oscuroAhora = await p.evaluate(() => document.documentElement.classList.contains('dark'));
+      anotar('la rampa de la leyenda cambia con el tema, como la del mapa', antesTema !== despuesTema && /252, 253, 191/.test(despuesTema) === oscuroAhora, `${oscuroAhora ? 'oscuro' : 'claro'}`);
+      await botonTema.click(); await esperarMapa(p);
+      // Consulta por punto sobre la mancha, de lejos (z7): encuentra la localidad (la mancha no tiene filtro de escala).
+      await p.keyboard.press('2');
+      const lugar = [-6737400, -3101000];
+      await p.evaluate(c => { const v = window.__visor().mapa.getView(); v.setCenter(c); v.setZoom(7); }, lugar);
+      await esperarMapa(p);
+      const consulta = await p.evaluate(async c => {
+        const v = window.__visor(); const px = v.mapa.getPixelFromCoordinate(c);
+        const caja = v.mapa.getTargetElement().getBoundingClientRect();
+        return [caja.left + px[0], caja.top + px[1]];
+      }, lugar);
+      await p.mouse.click(consulta[0], consulta[1]);
+      const hallo = await p.waitForFunction(() => /Localidades/.test(document.querySelector('[aria-label*="Información"], aside')?.innerText ?? document.body.innerText) && /Consulta por punto/.test(document.body.innerText), null, { timeout: 15000 }).then(() => true).catch(() => false);
+      anotar('consulta por punto sobre la mancha a escala región encuentra localidades', hallo && /entidades? en \d capas?/.test(await p.evaluate(() => document.body.innerText)) && await p.getByText('Localidades', { exact: true }).count() > 0);
+      await p.keyboard.press('Escape');
+      const v = await axe(p);
+      anotar('axe sin violaciones (calor)', v.length === 0, v.join(' · '));
+
+      // Imprimir con la mancha caída: error, sin descarga (la promesa de T2).
+      await ctx.route(/typeNames=tpi:localidades.*canthab/, r => r.fulfill({ status: 503, body: 'caido' }));
+      await p.keyboard.press('p');
+      const alerta = await p.waitForSelector('[role=dialog] [role=alert]', { timeout: 40000 }).then(() => true).catch(() => false);
+      anotar('imprimir con la mancha caída da error', alerta);
+      anotar('…y no deja descargar', (await ventana().getByRole('button', { name: /Descargar/ }).getAttribute('aria-disabled')) === 'true');
+      await p.keyboard.press('Escape');
+      await p.waitForSelector('#imprimir-titulo', { state: 'detached', timeout: 3000 }).catch(() => {});
+
+      // Con el WFS rechazado: nada de reintentos en bucle, y un aviso con "Reintentar" sobre el mapa.
+      let pedidos = 0;
+      p.on('request', r => { if (/typeNames=tpi:localidades.*canthab/.test(decodeURIComponent(r.url()))) pedidos++; });
+      // Lejos de lo ya cargado (Tierra del Fuego), para que tenga que pedir.
+      await p.evaluate(() => { const v = window.__visor().mapa.getView(); v.setCenter([-7600000, -7300000]); v.setZoom(9); });
+      await esperarMapa(p); await pausa(4000);
+      anotar('con el WFS caído no se repiten los pedidos', pedidos <= 2, `${pedidos} pedidos en 4 s`);
+      anotar('aviso sobre el mapa con "Reintentar"', await p.getByRole('alert').filter({ hasText: /Reintentar|Probar de nuevo/ }).count() > 0);
+      await ctx.unroute(/typeNames=tpi:localidades.*canthab/);
+      // Los 503 son los que fingió la prueba.
+      registro.errores.splice(0, Infinity, ...registro.errores.filter(e => !/503|Failed to load resource/.test(e)));
+      registro.fallas.splice(0, Infinity, ...registro.fallas.filter(e => !/^503 .*typeNames=tpi:localidades/.test(e)));
+
+      // Demasiados puntos (Otras edificaciones: 96.056) a escala país: sin mancha parcial, se pide acercarse.
+      await p.evaluate(() => window.__visor().mapa.getView().setResolution(9000));
+      await esperarMapa(p);
+      await p.getByRole('button', { name: /^Edificaciones/ }).first().click().catch(() => {});
+      await p.locator('label').filter({ hasText: /^Otras edificaciones/ }).first().click({ timeout: 5000 }).catch(() => {});
+      const otras = p.getByRole('radiogroup', { name: /Ver Otras edificaciones como/ });
+      if (await otras.count()) {
+        await otras.getByRole('radio', { name: 'Calor' }).click();
+        await p.waitForFunction(() => window.__visor().calor.get('otras_edificaciones')?.get('mancha')?.getSource().get('estado')?.fase === 'demasiados', null, { timeout: 30000 }).catch(() => {});
+        const o = await estado('otras_edificaciones');
+        anotar('Calor con demasiados puntos: mancha vacía, nunca parcial', o.fase === 'demasiados' && o.puntos === 0, `fase ${o.fase} · ${o.puntos} puntos`);
+        anotar('…y un aviso con "Acercar"', await p.getByRole('alert').filter({ hasText: /Acercar/ }).count() > 0);
+        await capturar(p, informe, entorno.salida, 'calor-demasiados');
+        await otras.getByRole('radio', { name: 'Puntos' }).click();
+      } else { await capturar(p, informe, entorno.salida, 'calor-sin-selector'); anotar('selector de calor para Otras edificaciones', false, 'no se encontró el radiogroup'); }
+      await p.getByRole('radiogroup', { name: /Ver Localidades como/ }).getByRole('radio', { name: 'Puntos' }).click();
+      await esperarMapa(p);
+      const f = await estado('localidades');
+      anotar('Puntos: vuelve a dibujarse con el WMS', !f.activo && f.enWms && f.visible);
+    } else {
+      const tarjeta = p.getByRole('button', { name: /^¿Dónde vive la gente/ });
+      const antes = await estado('localidades');
+      await tarjeta.click();
+      await conPuntos('localidades'); await esperarMapa(p);
+      const e = await estado('localidades');
+      anotar('"¿Dónde vive la gente?" muestra la mancha de población', e.activo && e.puntos > 0 && (await tarjeta.getAttribute('aria-pressed')) === 'true', `${e.puntos} localidades`);
+      await capturar(p, informe, entorno.salida, 'donde-vive');
+      await tarjeta.click(); await esperarMapa(p);
+      const f = await estado('localidades');
+      anotar('al tocarla de nuevo vuelve a como estaba', !f.activo && f.visible === antes.visible && f.enWms === antes.enWms);
+      // Densidad: escuelas como manchas.
+      await p.getByRole('button', { name: /^Escuelas, salud y más/ }).click();
+      const escuelas = p.locator('[data-guia=temas] li').filter({ hasText: /^Escuelas/ }).first();
+      await escuelas.getByRole('button').first().click();
+      await escuelas.getByRole('button', { name: /Ver como manchas/ }).click();
+      await conPuntos('edif_educacion'); await esperarMapa(p);
+      const d = await estado('edif_educacion');
+      anotar('"Ver como manchas" muestra la densidad de escuelas', d.activo && d.puntos > 0, `${d.puntos} escuelas`);
+      anotar('la leyenda de la densidad dice pocos / muchos', /Muchos/.test(await p.evaluate(() => document.body.innerText)));
+      // La intensidad no depende de cómo se llegó: el peso es el mismo al volver de más lejos.
+      const pesoEscuelas = () => p.evaluate(() => window.__visor().calor.get('edif_educacion')?.get('mancha')?.styleVariables_?.densidad);
+      const vista = await p.evaluate(() => { const v = window.__visor().mapa.getView(); return [v.getCenter(), v.getZoom()]; });
+      const peso0 = await pesoEscuelas();
+      await p.evaluate(() => { const v = window.__visor().mapa.getView(); v.setZoom(v.getZoom() - 2); }); await esperarMapa(p);
+      const pesoLejos = await pesoEscuelas();
+      await p.evaluate(([c, z]) => { const v = window.__visor().mapa.getView(); v.setCenter(c); v.setZoom(z); }, vista); await esperarMapa(p);
+      await p.waitForFunction(w => window.__visor().calor.get('edif_educacion')?.get('mancha')?.styleVariables_?.densidad === w, peso0, { timeout: 5000 }).catch(() => {});
+      const peso1 = await pesoEscuelas();
+      anotar('la densidad pesa según lo que se ve, no según el camino', peso0 === peso1 && pesoLejos < peso0, `${peso0?.toFixed(3)} → ${pesoLejos?.toFixed(3)} → ${peso1?.toFixed(3)}`);
+      await capturar(p, informe, entorno.salida, 'manchas-escuelas');
+      const v = await axe(p);
+      anotar('axe sin violaciones (manchas)', v.length === 0, v.join(' · '));
+    }
+  }, entorno, combo);
+}
+
+// --- Tabla de datos (T4, modo profesional) ---
+// Los números se comparan con pedidos WFS hechos aparte (el mismo GeoServer), no con valores fijos.
+export function tabla(combo, entorno) {
+  return envolver('tabla', combo, async ({ p, anotar, informe }) => {
+    const tablaSel = 'section[aria-label^="Tabla de datos:"]';
+    const pie = () => p.locator(`${tablaSel} footer [role=status]`).innerText();
+    const filas = () => p.locator(`${tablaSel} [role=row]`);
+    const contar = cql => p.evaluate(async cql => {
+      const r = await fetch(`/geoserver/tpi/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=tpi:localidades&resultType=hits${cql ? `&CQL_FILTER=${encodeURIComponent(cql)}` : ''}`);
+      return Number((await r.text()).match(/numberMatched="(\d+)"/)?.[1]);
+    }, cql);
+    const esperarPie = re => p.waitForFunction(([s, re]) => new RegExp(re).test(document.querySelector(`${s} footer [role=status]`)?.textContent ?? ''), [tablaSel, re], { timeout: 15000 }).then(() => true).catch(() => false);
+    const n = v => v.toLocaleString('es-AR');
+
+    await p.keyboard.press('t');
+    await p.waitForSelector(tablaSel, { timeout: 8000 });
+    await p.getByRole('tab', { name: /^Localidades/ }).click();
+    const total = await contar('');
+    anotar('T abre la tabla y cuenta todas las localidades', await esperarPie(`de ${n(total)}$`), await pie());
+    const margen = await p.evaluate(s => {
+      const t = document.querySelector(s).getBoundingClientRect(); const z = document.querySelector('[aria-label="Acercar"]')?.getBoundingClientRect();
+      return { arriba: t.top, zoom: z ? z.bottom : 0 };
+    }, tablaSel);
+    anotar('los botones de zoom suben sobre la tabla', margen.zoom > 0 && margen.zoom <= margen.arriba, `zoom ${Math.round(margen.zoom)} · tabla ${Math.round(margen.arriba)}`);
+    await capturar(p, informe, entorno.salida, 'abierta');
+    let v = await axe(p);
+    anotar('axe sin violaciones (tabla)', v.length === 0, v.join(' · '));
+
+    // Buscar: sin tildes ni mayúsculas.
+    await p.getByLabel(/^Buscar en Localidades/).fill('resisténcia');
+    const buscadas = await contar("strStripAccents(nombre) ILIKE '%resistencia%' OR strStripAccents(tipo) ILIKE '%resistencia%' OR strStripAccents(departamen) ILIKE '%resistencia%' OR strStripAccents(provincia) ILIKE '%resistencia%'");
+    anotar('buscar «resisténcia» encuentra las Resistencia', await esperarPie(`de ${n(buscadas)} filtradas`) && /Resistencia/.test(await filas().nth(1).innerText()), await pie());
+    await p.getByLabel(/^Buscar en Localidades/).fill('');
+
+    // Filtro por columna + orden.
+    await p.getByRole('button', { name: /^Filtrar/ }).click();
+    const form = p.locator('form[aria-label="Nuevo filtro"]');
+    await form.locator('select').first().selectOption('canthab');
+    await form.locator('select').nth(1).selectOption('mayor');
+    await form.locator('input').fill('100.000');
+    await form.getByRole('button', { name: /Agregar filtro/ }).click();
+    const grandes = await contar('canthab > 100000');
+    anotar('filtro «Habitantes mayor que 100.000»', await esperarPie(`de ${n(grandes)} filtradas`), await pie());
+    v = await axe(p);
+    anotar('axe sin violaciones (con un filtro)', v.length === 0, v.join(' · '));
+    await capturar(p, informe, entorno.salida, 'filtro');
+    const encabezado = p.getByRole('columnheader', { name: /Habitantes/ });
+    await encabezado.click(); await esperarPie('filtradas');
+    await encabezado.click();
+    await p.waitForFunction(s => document.querySelector(`${s} [role=columnheader][aria-sort="descending"]`), tablaSel, { timeout: 8000 }).catch(() => {});
+    await p.waitForFunction(s => /1\.267\.521|\d{1,3}\.\d{3}\.\d{3}/.test(document.querySelectorAll(`${s} [role=row]`)[1]?.textContent ?? ''), tablaSel, { timeout: 8000 }).catch(() => {});
+    const mayor = await p.evaluate(async () => {
+      const r = await fetch('/geoserver/tpi/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=tpi:localidades&outputFormat=application/json&count=1&sortBy=canthab+D&propertyName=nombre,canthab');
+      return (await r.json()).features[0].properties;
+    });
+    anotar('ordenar por habitantes (de mayor a menor)', (await filas().nth(1).innerText()).includes(n(mayor.canthab)), `${mayor.nombre} ${n(mayor.canthab)}`);
+    if (grandes > 50) {
+      await p.getByRole('button', { name: 'Página siguiente' }).click();
+      anotar('página siguiente', await esperarPie(`^51–${n(Math.min(100, grandes))} de`), await pie());
+      await p.getByRole('button', { name: 'Página anterior' }).click(); await esperarPie('^1–');
+    }
+
+    // Exportar lo filtrado a CSV.
+    const [descarga] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.getByRole('button', { name: /a CSV$/ }).click()]);
+    const csv = await descarga.createReadStream().then(s => new Promise(r => { let t = ''; s.on('data', d => { t += d; }); s.on('end', () => r(t)); }));
+    const lineas = csv.trim().split('\n');
+    anotar('exportar a CSV: todo lo filtrado, con geometría', lineas.length - 1 === grandes && /geom/.test(lineas[0]) && /POINT/.test(lineas[1]), `${lineas.length - 1} filas · ${descarga.suggestedFilename()}`);
+
+    // Ir a la entidad, con el teclado: la fila con foco y Enter.
+    await filas().nth(1).focus();
+    await p.keyboard.press('Enter');
+    const fue = await p.waitForFunction(() => /desde la tabla/.test(document.body.innerText) && window.__visor().foco.getFeatures().length === 1, null, { timeout: 15000 }).then(() => true).catch(() => false);
+    await esperarMapa(p);
+    const ubicacion = await p.evaluate(s => {
+      const v = window.__visor(); const f = v.foco.getFeatures()[0];
+      const px = v.mapa.getPixelFromCoordinate(f.getGeometry().getFirstCoordinate());
+      const caja = v.mapa.getTargetElement().getBoundingClientRect();
+      return { y: caja.top + px[1], x: caja.left + px[0], arriba: document.querySelector(s).getBoundingClientRect().top };
+    }, tablaSel);
+    anotar('Enter en una fila: va a la entidad y la muestra en el inspector', fue);
+    anotar('…y queda a la vista, arriba de la tabla', ubicacion.y > 80 && ubicacion.y < ubicacion.arriba, `y ${Math.round(ubicacion.y)} · tabla ${Math.round(ubicacion.arriba)}`);
+    await capturar(p, informe, entorno.salida, 'ir-a');
+
+    // Obras: editar y borrar por WFS-T (con --con-alta o en nivel completo).
+    if (entorno.conAlta) {
+      const marca = `verificar-tabla ${informe.combo} ${Date.now()}`;
+      const ins = await p.evaluate(async marca => {
+        const xml = '<wfs:Transaction service="WFS" version="1.1.0" xmlns:wfs="http://www.opengis.net/wfs" xmlns:gml="http://www.opengis.net/gml" xmlns:tpi="https://github.com/matiasgzlez/TPI-GIS">'
+          + `<wfs:Insert><tpi:obras_rn11><tpi:tipo_obra>bacheo</tpi:tipo_obra><tpi:prioridad>baja</tpi:prioridad><tpi:estado>relevado</tpi:estado><tpi:descripcion>${marca}</tpi:descripcion><tpi:geom><gml:Point srsName="EPSG:4326"><gml:pos>-27.2 -59.4</gml:pos></gml:Point></tpi:geom></tpi:obras_rn11></wfs:Insert></wfs:Transaction>`;
+        const r = await fetch('/wfst', { method: 'POST', headers: { 'Content-Type': 'text/xml' }, body: xml });
+        return (await r.text()).match(/totalInserted>(\d+)/)?.[1];
+      }, marca);
+      await p.getByRole('tab', { name: /^Obras de mantenimiento/ }).click();
+      await p.getByLabel(/^Buscar en Obras/).fill(marca);
+      await esperarPie('de 1 filtradas');
+      await filas().nth(1).click();
+      const editor = p.locator('form[aria-label^="Editar la obra"]');
+      await editor.getByRole('radio', { name: /Alta/ }).or(editor.getByRole('button', { name: /^Alta$/ })).first().click();
+      await editor.getByRole('button', { name: 'Guardar cambios' }).click();
+      const editada = await p.waitForFunction(s => /Alta/.test(document.querySelectorAll(`${s} [role=row]`)[1]?.textContent ?? ''), tablaSel, { timeout: 10000 }).then(() => true).catch(() => false);
+      anotar('editar una obra desde la tabla (WFS-T)', ins === '1' && editada);
+      await editor.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+      v = await axe(p);
+      anotar('axe sin violaciones (tabla de obras)', v.length === 0, v.join(' · '));
+      await filas().nth(1).click();
+      await p.getByRole('button', { name: 'Borrar la obra' }).click();
+      await p.getByRole('button', { name: 'Sí, borrar' }).click();
+      anotar('borrar una obra desde la tabla (WFS-T)', await esperarPie('^0 entidades'), await pie());
+    }
+
+    // Con el foco adentro (en la pestaña), T la cierra y el foco vuelve al botón de la tabla.
+    await p.locator(`${tablaSel} [role=tab][aria-selected=true]`).focus();
+    await p.keyboard.press('t');
+    anotar('T cierra la tabla', await p.waitForSelector(tablaSel, { state: 'detached', timeout: 4000 }).then(() => true).catch(() => false));
+    await esperarFoco(p);
+    anotar('…y el foco vuelve al botón de la tabla', await p.evaluate(() => document.activeElement?.getAttribute('aria-label')) === 'Tabla de datos (T)');
   }, entorno, combo);
 }

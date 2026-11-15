@@ -16,6 +16,8 @@ import { dibujarMapa, encuadreActual, escalaParaEncuadre, escalaVecina, ESCALA_M
 import { generarPdf, marcoMapa, type Contenido, type Leyenda, type Orientacion } from './pdf';
 import VistaPrevia from './VistaPrevia';
 import { ubicarEntidades } from '../cercanias';
+import { esPoblacion } from '../calor';
+import { GRADIENTES } from '../calorColores';
 import { nombrePro, nombreSimple } from '../entidades';
 
 interface Props {
@@ -59,6 +61,29 @@ function leyendaDe(nombre: string, simple: boolean): Promise<Leyenda | null> {
     })());
   }
   return leyendasGuardadas.get(clave)!;
+}
+
+// Leyenda de una capa vista como calor (T3): la rampa de colores con sus dos extremos, dibujada en un
+// lienzo a la misma escala que las leyendas de GeoServer (192 ppp, letra de 12 px → 24 px).
+function leyendaCalor(nombre: string, simple: boolean): Leyenda {
+  const poblacion = esPoblacion(nombre);
+  const [menos, mas] = poblacion ? (simple ? ['Poca gente', 'Mucha gente'] : ['Menos habitantes', 'Más habitantes']) : (simple ? ['Pocos', 'Muchos'] : ['Menor densidad', 'Mayor densidad']);
+  const lienzo = document.createElement('canvas');
+  lienzo.width = 520; lienzo.height = 78;
+  const ctx = lienzo.getContext('2d')!;
+  const rampa = ctx.createLinearGradient(0, 0, 500, 0);
+  const colores = (poblacion ? GRADIENTES.poblacion.claro : GRADIENTES.densidad.claro).slice(1);
+  colores.forEach((c, i) => rampa.addColorStop(i / (colores.length - 1), c));
+  ctx.fillStyle = rampa;
+  ctx.beginPath(); ctx.roundRect(2, 4, 500, 26, 13); ctx.fill();
+  ctx.fillStyle = '#3d4248';
+  ctx.font = '500 24px "Instrument Sans Variable", "Instrument Sans", sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillText(menos, 2, 44);
+  ctx.textAlign = 'right';
+  ctx.fillText(mas, 502, 44);
+  const titulo = `${simple ? capaSimple(nombre)?.titulo ?? tituloDeCapa(nombre) : tituloDeCapa(nombre)} (${simple ? 'manchas' : 'mapa de calor'})`;
+  return { titulo, imagen: lienzo.toDataURL('image/png'), ancho: lienzo.width, alto: lienzo.height };
 }
 
 // ¿Hay obras cargadas? Si la pregunta falla, se asume que sí (mejor una leyenda de más que de menos).
@@ -117,6 +142,8 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
   const [armando, setArmando] = useState(true);
   // Errores por separado (uno no borra al otro): el mapa, las leyendas y el armado del PDF.
   const [errorMapa, setErrorMapa] = useState<string | null>(null);
+  // El mapa no salió porque una mancha tiene demasiados puntos para el encuadre: la salida es acercar, no reintentar.
+  const [mapaDemasiados, setMapaDemasiados] = useState(false);
   const [errorLeyenda, setErrorLeyenda] = useState<string | null>(null);
   const [errorPdf, setErrorPdf] = useState<string | null>(null);
   // Si pdf.js no puede mostrar la hoja, no se descarga a ciegas.
@@ -176,8 +203,20 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
     const control = new AbortController();
     setArmando(true);
     dibujarMapa(visor, marco.ancho, marco.alto, extension, denominador, control.signal)
-      .then(m => { setMapa({ clave: claveMapa, impreso: m }); setErrorMapa(null); })
-      .catch(e => { if (e.name !== 'AbortError') { setErrorMapa(simple ? 'No pudimos traer el mapa.' : 'No se pudo cargar el mapa de GeoServer.'); setArmando(false); } });
+      .then(m => { setMapa({ clave: claveMapa, impreso: m }); setErrorMapa(null); setMapaDemasiados(false); })
+      .catch(e => {
+        if (e.name === 'AbortError') return;
+        // Un mapa de calor que no se pudo traer entero para el encuadre de la hoja (capasParaImprimir).
+        const calor = /^calor:([^:]+):(\w+)$/.exec((e as Error).message);
+        const capa = calor && (simple ? capaSimple(calor[1])?.titulo ?? tituloDeCapa(calor[1]) : tituloDeCapa(calor[1]));
+        setMapaDemasiados(calor?.[2] === 'demasiados');
+        setErrorMapa(calor
+          ? calor[2] === 'demasiados'
+            ? (simple ? `Hay demasiados de «${capa}» para esta hoja: mirá más de cerca.` : `«${capa}» tiene más puntos que el tope de la mancha en este encuadre: acercá la escala.`)
+            : (simple ? `No pudimos traer las manchas de «${capa}».` : `No se pudieron cargar los puntos de la mancha de «${capa}».`)
+          : (simple ? 'No pudimos traer el mapa.' : 'No se pudo cargar el mapa de GeoServer.'));
+        setArmando(false);
+      });
     return () => control.abort();
   }, [visor, marco, extension, denominador, reintento, simple, claveMapa]);
 
@@ -188,7 +227,7 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
     let vigente = true;
     const nombres = [...capasVisibles(visor)].reverse();
     // Las obras sin ninguna cargada no van a la leyenda (explicaría algo que no está en el mapa).
-    hayObras().then(hay => Promise.all(nombres.filter(n => n !== 'obras_rn11' || hay).map(n => leyendaDe(n, simple)))).then(ls => {
+    hayObras().then(hay => Promise.all(nombres.filter(n => n !== 'obras_rn11' || hay).map(n => (visor.calor.has(n) ? Promise.resolve(leyendaCalor(n, simple)) : leyendaDe(n, simple))))).then(ls => {
       if (!vigente) return;
       setLeyendas({ clave: claveLeyendas, lista: ls.filter((l): l is Leyenda => !!l) });
       // Una leyenda que no llegó es un error: la hoja saldría incompleta.
@@ -318,7 +357,7 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
             {pdf && pdf.paginas > 1 && <span className="rounded-full bg-[var(--superficie)] px-3 py-1.5 shadow-[0_0_0_1px_var(--linea)]">{pdf.paginas} páginas</span>}
           </div>
           <div className="min-h-0 flex-1">
-            <VistaPrevia onPagina={setPaginaVista} blob={pdf?.blob ?? null} ocupado={generando} explicacion={simple ? 'Puede que el servidor de mapas no esté andando. Probá de nuevo en un ratito.' : 'Revisá que GeoServer esté andando y volvé a probar.'} error={error} conMiniaturas={!!contenido && mostrar.respuesta} onDibujada={b => { setBlobDibujado(b); if (b) setErrorVista(null); }} onErrorVista={() => setErrorVista(simple ? 'No pudimos mostrar la hoja.' : 'No se pudo mostrar la vista previa del PDF.')} onReintentar={() => { setErrorMapa(null); setErrorLeyenda(null); setErrorPdf(null); setErrorUbicaciones(null); setErrorVista(null); setReintento(r => r + 1); botonDescargar.current?.focus(); }} textoOcupado={t.ocupado} proporcionInicial={orientacion === 'horizontal' ? 210 / 297 : 297 / 210} />
+            <VistaPrevia onPagina={setPaginaVista} blob={pdf?.blob ?? null} ocupado={generando} explicacion={mapaDemasiados && error === errorMapa ? undefined : simple ? 'Puede que el servidor de mapas no esté andando. Probá de nuevo en un ratito.' : 'Revisá que GeoServer esté andando y volvé a probar.'} accion={mapaDemasiados && error === errorMapa && puedeAcercar ? { texto: t.acercar, icono: <MagnifyingGlassPlus size={17} weight="bold" />, alElegir: () => { setEscalaElegida(escalaVecina(denominador, -1)); botonDescargar.current?.focus(); } } : null} error={error} conMiniaturas={!!contenido && mostrar.respuesta} onDibujada={b => { setBlobDibujado(b); if (b) setErrorVista(null); }} onErrorVista={() => setErrorVista(simple ? 'No pudimos mostrar la hoja.' : 'No se pudo mostrar la vista previa del PDF.')} onReintentar={() => { setErrorMapa(null); setErrorLeyenda(null); setErrorPdf(null); setErrorUbicaciones(null); setErrorVista(null); setReintento(r => r + 1); botonDescargar.current?.focus(); }} textoOcupado={t.ocupado} proporcionInicial={orientacion === 'horizontal' ? 210 / 297 : 297 / 210} />
           </div>
         </div>
 

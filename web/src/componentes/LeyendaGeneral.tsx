@@ -2,6 +2,7 @@ import { useEffect, useReducer, useState } from 'react';
 import { tituloDeCapa } from '../config';
 import { capaSimple, miniatura, useInterfaz } from '../interfaz';
 import { capasVisibles, cargarLeyenda, suscribirCapas, type Visor } from '../visor';
+import { LeyendaCalor } from './Calor';
 
 // La leyenda de todo lo que está prendido, en el orden del mapa (lo de arriba primero). Consigna A.3:
 // "mostrar la leyenda de las capas (clases de la simbología)". La usa el inspector del modo profesional
@@ -32,7 +33,9 @@ export default function LeyendaGeneral({ visor }: { visor: Visor }) {
                 {interfaz === 'pro' && <p className="truncate font-mono text-[11.5px] text-[var(--tinta-3)]">tpi:{nombre}</p>}
               </div>
             </div>
-            <ImagenLeyenda nombre={nombre} simple={interfaz === 'simple'} />
+            {visor.calor.has(nombre)
+              ? <LeyendaCalor visor={visor} nombre={nombre} simple={interfaz === 'simple'} className="ml-[60px] mt-2" />
+              : <ImagenLeyenda nombre={nombre} simple={interfaz === 'simple'} />}
           </li>
         );
       })}

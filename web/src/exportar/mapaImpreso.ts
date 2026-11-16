@@ -6,7 +6,7 @@ import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
 import { getCenter, getHeight, getWidth } from 'ol/extent';
 import { toLonLat } from 'ol/proj';
-import { capasParaImprimir, extensionLibre, type Visor } from '../visor';
+import { capasParaImprimir, corteEnCoordenada, extensionLibre, type Visor } from '../visor';
 
 // Metros de papel por píxel CSS (96 ppp).
 const METROS_POR_PX = 0.0254 / 96;
@@ -119,10 +119,24 @@ export async function dibujarMapa(visor: Visor, anchoMm: number, altoMm: number,
       ctx.setTransform(...(matriz.map(v => v * PIXEL_RATIO) as [number, number, number, number, number, number]));
       const fondo = (capa.parentNode as HTMLElement).style.backgroundColor;
       if (fondo) { ctx.fillStyle = fondo; ctx.fillRect(0, 0, capa.width, capa.height); }
+      // Una mancha de calor con la cortina (T6): su lienzo WebGL se recorta por CSS, que acá no cuenta.
+      const corte = capa.dataset.corte?.split(':');
+      if (corte) {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        const x = Number(corte[1]) * PIXEL_RATIO;
+        ctx.beginPath();
+        ctx.rect(corte[0] === 'izq' ? 0 : x, 0, corte[0] === 'izq' ? x : lienzo.width - x, lienzo.height);
+        ctx.clip();
+        ctx.setTransform(...(matriz.map(v => v * PIXEL_RATIO) as [number, number, number, number, number, number]));
+      }
       ctx.drawImage(capa, 0, 0);
+      if (corte) ctx.restore();
     });
     ctx.globalAlpha = 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const corteX = corteEnCoordenada(visor);
+    if (corteX !== null && visor.comparacion) dibujarCortina(ctx, mapa.getPixelFromCoordinate([corteX, centro[1]])[0] * PIXEL_RATIO, visor.comparacion.titulos);
     return {
       imagen: lienzo.toDataURL('image/jpeg', 0.93),
       denominador,
@@ -135,4 +149,34 @@ export async function dibujarMapa(visor: Visor, anchoMm: number, altoMm: number,
     mapa.dispose();
     destino.remove();
   }
+}
+
+// La cortina en la hoja: la línea del corte y el nombre de cada lado arriba, como en pantalla.
+function dibujarCortina(ctx: CanvasRenderingContext2D, x: number, [izquierda, derecha]: [string, string]) {
+  const { width: ancho, height: alto } = ctx.canvas;
+  if (x <= 0 || x >= ancho) return;
+  const r = PIXEL_RATIO;
+  ctx.save();
+  ctx.fillStyle = 'rgba(21,23,26,.35)';
+  ctx.fillRect(x - 2 * r, 0, 4 * r, alto);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x - 1 * r, 0, 2 * r, alto);
+  ctx.font = `600 ${12 * r}px "Instrument Sans Variable", "Instrument Sans", sans-serif`;
+  ctx.textBaseline = 'middle';
+  const rotulo = (texto: string, lado: 'izq' | 'der') => {
+    const t = lado === 'izq' ? `‹ ${texto}` : `${texto} ›`;
+    const w = ctx.measureText(t).width + 16 * r;
+    const h = 24 * r;
+    const x0 = lado === 'izq' ? Math.max(6 * r, x - 8 * r - w) : Math.min(ancho - 6 * r - w, x + 8 * r);
+    const y0 = 8 * r;
+    ctx.fillStyle = 'rgba(255,255,255,.94)';
+    ctx.beginPath();
+    ctx.roundRect(x0, y0, w, h, h / 2);
+    ctx.fill();
+    ctx.fillStyle = '#15171a';
+    ctx.fillText(t, x0 + 8 * r, y0 + h / 2 + 0.5 * r);
+  };
+  rotulo(izquierda, 'izq');
+  rotulo(derecha, 'der');
+  ctx.restore();
 }

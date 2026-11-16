@@ -692,9 +692,257 @@ Estados: `propuesto` · `aprobado` · `en curso` · `hecho` · `descartado`.
   - Reproducir y pausar en el mismo cuadro anduvo bien en 42 de 42 casos.
   - Los números a 10 y 20 km son exactos y no hubo regresiones.
   - Anotado (muy baja): dos `click()` en la misma tarea de JS (solo desde un script) no emiten el anuncio de pausa.
-- [ ] **T6 · Comparador deslizante** — `aprobado`
+- [x] **T6 · Comparador deslizante** — `hecho` (16/11; cerró con la verificación rev43)
   - Cortina que divide el mapa en dos juegos de capas elegibles, con el atajo "Natural vs. Humano".
   - Bloqueado por: T1.
+
+  **Decisiones (16/11, con Matias):**
+  - La izquierda es el mapa de siempre: las capas prendidas. El panel de capas la sigue cambiando, y las consultas, el calor y la tabla andan igual. La derecha es un juego aparte.
+  - Abre con Natural vs. Humano y, al cerrar, el mapa vuelve a las capas (y manchas de calor) de antes.
+  - Cada lado se elige entre juegos listos y pares. En el profesional también se puede elegir capa por capa.
+
+  **Hecho el 16/11:**
+  - *Dónde se abre.* Con la tecla C (los dos modos), con «Comparar» entre los botones grandes del simple o con el botón de cortina de la barra de arriba del profesional. Carga diferida (`componentes/Comparador.tsx`).
+  - *La cortina:*
+    - entra con un resorte desde el borde derecho hasta el medio del lugar libre del mapa (sin animación con movimiento reducido);
+    - la línea va de arriba abajo;
+    - la manija se arrastra, igual que la línea (franja de 16 px);
+    - con el teclado: flechas 2 %, Re Pág / Av Pág 10 %, Inicio y Fin a los bordes;
+    - es un `slider` con `aria-valuetext` («50 %: a la izquierda Natural, a la derecha Humano») y recibe el foco al abrir;
+    - se mueve solo dentro del lugar libre (`areaLibre`), nunca debajo de un panel, y se vuelve a medir al plegar paneles, abrir la tabla o cambiar de modo.
+  - *Arriba, sobre la línea:* el nombre de cada lado («◂ Izquierda · Natural», «Derecha ▸ · Humano»), el botón para intercambiar los lados (centrado sobre la línea) y el de cerrar. Tocar un nombre abre su lista:
+    - *pares listos:* Natural vs. Humano, Monte vs. Campos sembrados, Agua vs. Caminos;
+    - *juegos:* «Lo que estabas viendo», Natural, Humano, Monte, Campos sembrados, Agua, Caminos y cada temática (simple) o grupo (profesional), todos con las provincias de fondo;
+    - en el profesional, *capas a medida*, con casillas por grupo.
+
+    El nombre de un lado sale de sus capas (`nombreLado` en `comparador.ts`): si coincide con un juego, el juego; si no, «A medida · n capas» o «Tu elección».
+  - *En el mapa* (`visor.ts`):
+    - la derecha tiene su propia capa WMS (`wmsDerecha`);
+    - cada capa lleva su lado y se recorta en `prerender` con `clip` en el lienzo 2D;
+    - las manchas de calor (WebGL) se recortan con `clip-path` sobre su lienzo, porque con `gl.scissor` el borrado del cuadro también quedaba limitado y dejaba restos;
+    - los nombres de provincia y de capitales que pinta el visor siguen a su capa: en los dos lados o solo en el suyo.
+  - *Consultas:*
+    - el punto y el cartel preguntan por las capas del lado donde se toca (`capasEn`);
+    - el rectángulo que cruza el corte consulta cada capa solo en su parte, cortada en la coordenada del corte.
+  - *Leyenda:* con la cortina, el inspector y las Referencias muestran una lista por lado.
+  - *Hoja impresa:* la cortina sale en la misma coordenada del mapa, con la línea y el nombre de cada lado. La leyenda suma las capas de la derecha. El calor se recorta al componer la hoja.
+  - *Esc:* cierra primero la lista abierta, después la herramienta o los resultados, y al final la cortina. Con el foco en la cortina, la cierra directamente. Al cerrar, el foco vuelve a quien la abrió.
+  - *Estilos que hacían falta para comparar.* Vegetación, vías del tren, caminos secundarios, líneas de alta tensión y ejidos tenían el estilo por defecto de GeoServer:
+    - el monte y los cultivos eran la misma mancha gris;
+    - el tren y los cables eran líneas azules, como ríos («Blue Line» en la leyenda).
+
+    Ahora tienen colores de atlas (estilos.ts) y nombres simples en la leyenda, y sus miniaturas se rehicieron. Los caminos secundarios (22.353 tramos) se dibujan desde 1:1.500.000, como los de tierra.
+  - *Batería.* Prueba `comparador` (simple y pro, tres tamaños, claro y oscuro):
+    - abre con Natural vs. Humano, con cada juego en su capa WMS;
+    - la cortina queda en el medio y el foco en la manija;
+    - nada del comparador queda debajo de un panel;
+    - Fin, Inicio y Re Pág;
+    - arrastre;
+    - par Monte vs. Campos y foco de vuelta;
+    - la consulta por punto usa las capas del lado tocado;
+    - axe con la lista abierta y cerrada;
+    - Esc en orden;
+    - al cerrar vuelven las capas y no queda ningún recorte.
+  - Corregido en el camino: la lista que se cerraba (unos 0,3 s de animación) se comía un clic rápido sobre el mapa y cambiaba el lado. Mientras sale queda `inert`.
+  - Rendimiento sin cambios contra el HEAD (383 KB al abrir; «JS al mover» en pro a 1440 ya daba 28–33 ms antes de T6).
+
+  **Revisión rev31 (cierre, 16/11): NO APROBADO** (simple: diseño 8, usabilidad 7,5, creatividad 8,5, contenido 7,5; pro: 8, 7,5, 8, 7,5). La batería pasó entera. Hallazgos y qué se hizo:
+  1. Con la animación de distancia (T5) abierta, su panel tapaba los nombres de los lados. Ahora la fila baja hasta debajo del panel (`.crecer-franja`, mirado con un MutationObserver).
+  2. La lista de un lado quedaba abierta al salir con Tab. Ahora se cierra con `focusin` afuera y también cuando el foco sale del documento, salvo que haya sido un clic adentro de la lista.
+  3. Las leyendas mostraban textos viejos o del otro modo («Blue Line», nombres del pro en el simple), en pantalla y en el PDF. nginx las guardaba por URL y el estilo viaja en el cuerpo del POST. Ahora `cargarLeyenda` suma a la URL el hash del estilo, como las teselas. La falla venía de antes de T6.
+  4. En la hoja faltaban capas de la derecha («Y 3 capas más»):
+     - primero van las capas de un solo lado, marcadas «‹ » o « ›» (la letra del PDF no tiene flechas), y al final las comunes;
+     - si en la hoja horizontal no entran en una columna, la leyenda pasa a dos.
+  5. Menores:
+     - la manija deja media manija de margen en los bordes;
+     - la línea tiene más halo en claro;
+     - los botones de comparar ya no cambian de nombre, porque marcan `aria-pressed`;
+     - los rótulos de la hoja usan ‹ y ›.
+  - La batería suma dos chequeos: la lista se cierra al salir con Tab, y con T5 abierta la fila queda debajo de su panel.
+
+  **Verificación rev32 (corrección, 16/11): NO APROBADO.** El punto 5 quedó bien. Los demás:
+  1. *Regresión:* con una lista abierta, tocar el otro lado abría su lista y la cerraba enseguida. La lista que salía seguía escuchando unos 0,3 s y su `onCerrar` cerraba la nueva. Ahora sus escuchas no hacen nada mientras sale (`useIsPresent` en una ref).
+  2. Con T5 abierta, Esc cerraba T5 antes que la lista o la cortina. Ahora T5 cede si hay una lista del comparador abierta o si el foco está en la cortina.
+  3. «Campos sembrados» mostraba «Red Square point» (`actividades_agropecuarias`, 21 establecimientos, sin estilo propio). Ahora es un triángulo ocre con título técnico y nombre simple, y su miniatura se rehízo. Las otras 23 capas sin estilo propio vienen de antes y quedan anotadas abajo.
+  4. En el PDF, un título largo cortado perdía la marca de lado. Ahora la marca va aparte (`Leyenda.lado`) y se recorta solo el nombre.
+  5. La fila quedaba pegada al panel de T5 si este se abría con la cortina abierta (se medía mientras entraba), o cuando el panel cambiaba de alto. Ahora se vuelve a medir al terminar la entrada y con un ResizeObserver sobre el panel.
+  - La batería suma un chequeo: pasar de un lado al otro deja abierta la lista nueva.
+
+  **Verificación rev33 (corrección, 16/11): NO APROBADO.** Esc con T5, «Campos sembrados» y el PDF quedaron en «sí». Faltaban dos detalles:
+  1. Volver a un lado mientras su lista salía la revivía, y el foco se quedaba en el nombre. Ahora cada apertura monta una lista nueva (`key` con un contador).
+  2. Al abrirse T5 con la cortina abierta, su panel tapaba la fila unos 0,5 s. Se medía con el transform de la entrada, y la transición de `top` se reiniciaba en cada cuadro. Ahora se mide sin transform (`offsetTop`/`offsetHeight`), y la fila baja al instante y sube animada. Medido cuadro por cuadro durante 2 s a 1366 y 2560: ningún cuadro pisado.
+  - De paso, el triángulo de los establecimientos agropecuarios pasó de 8 a 11 px (casi no se veía).
+
+  **Verificación rev34 (corrección, 16/11): NO APROBADO.** Las listas (414 casos) y el triángulo quedaron en «sí», y la fila ya no queda tapada por T5 en ningún cuadro. Faltaba un caso combinado: en pro, con T5 y la tabla abiertos, el lugar libre queda bajo.
+  - La manija chocaba con la fila y con el panel de T5. A 1366, además, la X de cerrar caía encima del zoom.
+  - Ahora la manija se centra en lo que queda debajo de la fila, y la fila y la manija no pasan por debajo del bloque de zoom y minimapa cuando está a su altura. Si ese bloque sube con la cortina del otro lado, la manija vuelve adentro.
+  - La batería suma el caso: pro con T5 y la tabla abiertos, con Fin, Inicio y Fin, sin ningún cruce entre manija, fila, panel de T5 y zoom.
+
+  **Verificación rev35 (corrección, 16/11): NO APROBADO.** El simple, T5 sola, cerrar T5 y la tabla, las listas, Esc y las consultas quedaron en «sí». Faltaba en pro:
+  - el tope del bloque de zoom se medía viejo, a mitad de su transición, y la manija quedaba encima del minimapa al abrir o agrandar la tabla con la cortina a la derecha;
+  - con T5 y la tabla agrandada no había lugar, y la fila y la manija quedaban encima de la tabla;
+  - con el inspector plegado, la fila tapaba el botón «Leyenda»;
+  - la fila rozaba la indicación de la herramienta Punto.
+
+  Se cambió el enfoque: en vez de reglas por caso, un acomodo general (`acomodar` en `Comparador.tsx`).
+  - Cada cuadro se miden todos los paneles a la vista (`.interfaz .panel` y el minimapa, sin los del comparador). Solo se vuelve a dibujar si algo se movió.
+  - La fila de los lados se corre lo menos posible (abajo, a la izquierda o a la derecha) sin salir del lugar libre.
+  - La manija va en el medio de lo que queda debajo de la fila. Los paneles a su altura limitan hasta dónde llega la línea.
+  - Sin lugar debajo de la fila, la manija va en la fila misma, entre los dos nombres («compacta»), y el botón de intercambiar pasa al final.
+  - Esto reemplaza la medición especial del panel de T5 y del bloque de zoom.
+  - *T4 con T5:* la tabla agrandada tapaba el panel de la animación y el zoom, aun sin el comparador (venía de antes). Ahora el panel publica dónde termina (`--fondo-franja`), y la tabla no sube más allá: deja 200 px de mapa debajo.
+  - La batería suma un chequeo general: nada del comparador se cruza con ningún panel a la vista. Se prueba con:
+    - T5 y la tabla, en los bordes;
+    - la tabla agrandándose (a 300 ms) y agrandada;
+    - la tabla abriéndose con la cortina a la derecha (a 300 y a 1.100 ms).
+
+    Probado aparte, sin cruces en 1366, 1536 y 2560: el botón «Leyenda» con el inspector plegado y la indicación de Punto.
+
+  **Verificación rev36 (corrección, 16/11): NO APROBADO.**
+  - En «sí»:
+    - con todo quieto no queda ningún cruce, en ningún estado, tamaño ni modo;
+    - la tabla con T5 deja mapa libre debajo del panel;
+    - lo anterior no se rompió;
+    - el sondeo por cuadro cuesta 0,02–0,04 ms y no cambia los tiempos de cuadro.
+  - Faltaban cruces durante las transiciones. Se corrigió:
+    1. *Al cerrar la tabla, la manija bajaba sobre la tabla que todavía salía.* El alto de la tabla ahora vale hasta que terminó de salir: App usa `altoTabla`, que su ref pone en 0 al desmontarse, en lugar de `tabla ? altoTabla : 0`. Eso vale para el encuadre, el lugar libre y el zoom. Además, los paneles debajo de la fila, en la columna de la manija, acotan su banda desde abajo.
+    2. *La entrada con resorte pasaba sobre el minimapa:* ahora respeta el límite (`mover(limitar(v))`).
+    3. *El primer cuadro con la fila sobre T5:*
+       - la medida es sincrónica (`useLayoutEffect` y `flushSync`) y se repite apenas cambia el DOM (MutationObserver);
+       - no se filtra por opacidad, porque el panel que entra arranca transparente;
+       - el límite de la manija se aplica antes de pintar.
+  - La batería suma un monitor por cuadro durante las transiciones: cerrar la tabla con la cortina a la derecha, y abrir la cortina con T5 y la tabla agrandada.
+    - Lee justo antes del pintado, con un ResizeObserver, que corre después de todos los requestAnimationFrame. Leído en su propio requestAnimationFrame, podía medir antes de que la cortina se acomodara en ese cuadro.
+    - Resultado: ningún cuadro con más de 6 px de cruce, en dos corridas.
+
+  **Verificación rev37 (corrección, 16/11): NO APROBADO.**
+  - En «sí»: la manija sin cruces en todas las transiciones (unos 18.000 cuadros por combinación), los cambios de modo, lo anterior y el rendimiento (p95 de 9 ms).
+  - Faltaban dos cosas:
+    1. *Las listas de los lados se abrían encima de paneles* (el inspector, el tablero, el zoom y, con T5 y la tabla agrandada, la tabla). Se ubicaban solo contra la ventana y con 240 px mínimos. Ahora usan los mismos obstáculos (`ubicarLista`): se prueban debajo del nombre, alineadas por la izquierda o por la derecha, y al costado de la fila. Gana la que deja más alto, hasta el primer panel que tenga debajo, y si no entra todo se desplaza.
+    2. *Un cuadro con la X de la fila sobre un panel* al agrandar la tabla o abrirla con T5. El lugar libre se medía un cuadro tarde. Ahora App fija la disposición en `useLayoutEffect` y el sondeo mide el lugar libre en el mismo cuadro que los paneles.
+  - Batería:
+    - las listas entran en los chequeos de cruces, abiertas en cada borde con T5 y la tabla, compacta y agrandada;
+    - el monitor por cuadro baja su umbral a 2 px y suma agrandar la tabla con la cortina a la derecha.
+  - Probado aparte en el simple (1366 y 2560, con y sin T5): las listas, en cada borde, sin cruces.
+
+  **Verificación rev38 (corrección, 16/11): NO APROBADO.**
+  - En «sí»:
+    - ninguna lista se cruza con un panel, en unas 230 aperturas;
+    - teclado y axe con las listas abiertas;
+    - lo anterior y el rendimiento.
+  - Faltaba:
+    1. *Listas del lado contrario.* «Al costado de la fila» ganaba siempre, porque daba más alto, y probaba los dos costados. Ahora cada lista va solo de su lado: debajo de su nombre (la izquierda alineada primero por la derecha del nombre, la derecha al revés) o al costado de la fila hacia su lado. Gana la primera donde entra todo el contenido (o 320 px).
+    2. *Sin alto usable en pro con T5 y la tabla* (120 px, ningún ítem). Lo que la acotaba era el bloque de zoom y minimapa, y la propia manija, que se había sumado como obstáculo. Si contra todo no hay 320 px:
+       - la lista se ubica sin contar los controles del mapa y la manija, que se ocultan mientras está abierta (`data-lista-sin-lugar`);
+       - si aun así falta, la tabla se achica mientras está abierta (`--reserva-comparador`, por pasos que esperan a que la tabla termine de moverse; con dueño, para que la lista que sale no borre la reserva de la que entra).
+
+       A 1366 la lista queda en unos 228 px con la tabla a la vista.
+    3. *Un cuadro con la X sobre el inspector o el zoom* al abrir o agrandar la tabla. Eran tres cosas:
+       - App fijaba la disposición en un efecto que corre después de los de los hijos. Ahora la fija durante el render (es un valor de módulo, idempotente).
+       - El comparador mide paneles y lugar libre en un `useLayoutEffect` sobre la disposición.
+       - Al pasar a compacta, la fila se ensanchaba y su ancho llegaba un cuadro tarde (ResizeObserver). Ahora se mide en cada render, antes de pintar, y la fila compacta se acota al lugar libre.
+  - Batería:
+    - cada lista, en cada borde y con T5 y la tabla compacta y agrandada, se abre de su lado y con al menos 3 opciones a la vista;
+    - el monitor por cuadro suma abrir la tabla con T5 y la cortina a la derecha, y abrir la cortina con T5 y la tabla compacta.
+
+  **Verificación rev39 (corrección, 16/11): NO APROBADO.**
+  - En «sí»:
+    - 138 aperturas de listas sin problemas;
+    - el caso sin lugar, con cada forma de cierre;
+    - las transiciones de la tabla;
+    - `ponerDisposicion` en el render (encuadres, tabla, T5, modos).
+  - Faltaba:
+    1. *Pasar de una lista a la otra sin lugar.* La nueva quedaba sin opciones, o con los controles a la vista y la tabla entera. La reserva de lugar y los controles ocultos los manejaba cada lista, y la que salía (o el clic afuera, que deja `abierto` en nulo un instante) los borraba. Ahora:
+       - la lista solo los pone;
+       - el Comparador los saca cuando ya no queda ninguna lista abierta, con una pausa de 250 ms que se cancela si se abre la otra;
+       - la lista nueva hereda la reserva y el estado sin controles.
+    2. *Abrir T5 con la tabla agrandada:* la fila quedaba 2 o 3 cuadros bajo el panel. Ahora:
+       - si la fila no tiene ningún lugar sin cruces, se oculta hasta que lo haya (salvo que tenga el foco);
+       - en compacta, la fila y la manija se ubican en el tramo libre más cercano a la línea (se le restan al lugar libre los tramos que pisan los paneles), en el mismo render.
+
+       Antes, el lado de cada panel se decidía por su centro, y con la línea al otro lado del zoom no había límite.
+    3. *La cortina se movía sola* (de 71 % a 22 %) por un límite pasajero. Ahora:
+       - se guarda la posición pedida por el usuario (`pedida`);
+       - en cada render solo se acota la posición actual;
+       - cuando cambian los paneles o el lugar libre, vuelve hacia la pedida.
+
+       Así se evita un bucle: el límite depende de la posición de la línea y oscilaba (error #185 de React).
+  - De paso:
+    - la fila aparece con un fundido cuando la cortina terminó de entrar;
+    - los paneles que se mueven se estiran 2,5 veces su último desplazamiento (las transiciones aceleran y avanzan entre la medida y el pintado);
+    - el sondeo también mide cuando cambia `data-lista-sin-lugar`.
+  - Batería:
+    - pasar de la lista izquierda a la derecha con T5 y la tabla (la nueva muestra 3 opciones y no se cruza);
+    - al cerrar las listas no queda reserva ni controles ocultos;
+    - al abrir T5 con la tabla agrandada, la cortina no se mueve sola;
+    - el monitor por cuadro anota las coordenadas de cada cruce.
+
+  **Verificación rev40 (corrección, 16/11): NO APROBADO.** En «sí»:
+  - unas 120 aperturas de listas;
+  - unos 31.000 cuadros sin cruces;
+  - la cortina no se mueve sola;
+  - lo anterior y el rendimiento.
+
+  Faltaban dos casos de borde:
+  1. *La lista nueva sin opciones* si se abría entre 0,25 y 0,5 s después de cerrar la otra. La limpieza (pausa fija de 250 ms) sacaba la reserva, y la lista nueva había decidido la suya una sola vez, con la tabla todavía achicada. Ahora:
+     - la limpieza corre cuando terminó de salir la última lista (`onExitComplete`) y no se abrió otra;
+     - la reserva sigue al alto real cada 0,52 s mientras la lista esté abierta (hasta 12 pasos con falta).
+  2. *Un cuadro con la manija sobre el minimapa* en la primera apertura en frío (pro 1366 con T5 y la tabla). Ahora la manija se dibuja siempre dentro de su rango, calculado en el mismo render. Probado en frío 3 veces, sin cruces.
+
+  La batería suma: cerrar una lista y abrir la otra a los 350 ms, con T5 y la tabla; la nueva muestra 3 opciones y no se cruza.
+
+  **Verificación rev41 (corrección, 16/11): NO APROBADO.** En «sí»:
+  - la primera apertura en frío (16 estados, sin cruces);
+  - unos 190 cambios de lista con 3 opciones o más y sin cruces;
+  - lo anterior y el rendimiento.
+
+  Faltaba:
+  1. *La tabla quedaba achicada de más* (hasta 0 px a 1366) al pasar rápido de la izquierda a la derecha con la cortina en Fin y la máquina cargada. Además, la reserva solo crecía. Ahora la reserva es de ida y vuelta, y solo con todo quieto:
+     - no se mide al montar, sino cuando el alto de la lista dio dos lecturas iguales;
+     - si falta, se reserva sin dejar la tabla por debajo de su barra de pestañas (56 px);
+     - si sobra más de 16 px, se devuelve;
+     - después de cada cambio se espera a que la tabla termine de moverse.
+  2. *(Baja)* Al cerrar la cortina después de cambiar de modo, el foco quedaba en el body. Ahora va al botón de comparar del modo actual si el que la abrió ya no está.
+
+  La batería suma, con la cortina en Fin, pasar de la izquierda a la derecha a los 0 y 200 ms: 3 opciones y la tabla a la vista. Pasa también con 5 páginas a la vez.
+
+  **Verificación rev42 (corrección, 16/11): NO APROBADO.**
+  - En «sí»:
+    - la tabla nunca bajó de su barra de pestañas;
+    - las listas tuvieron siempre 3 opciones o más;
+    - el foco al cerrar después de cambiar de modo;
+    - lo anterior y el rendimiento.
+  - Faltaba:
+    1. *Con carga, uno o dos cuadros con la fila sobre T5* al cerrar una lista con la reserva puesta. Con el foco en un nombre, una fila sin lugar igual se mostraba. Ahora:
+       - sin lugar, la fila se oculta siempre (con el foco adentro, solo por opacidad, así sigue enfocable);
+       - el fundido es solo al aparecer, no al ocultarse.
+    2. *Reserva de más.*
+       - Antes de medir, se espera a que también la tabla dé dos lecturas iguales (con carga se medía con la tabla todavía en movimiento: 341 px).
+       - Solo se reserva si lo que acota la lista es el fondo del lugar libre (que sube con la tabla). Si sobra, se devuelve.
+       - *Decisión:* al pasar de una lista a la otra se conserva el lugar ya hecho, aunque a la nueva le alcanzara con menos (a 1536 con la tabla agrandada, 213 en vez de 154). Recalcular desde cero haría crecer y achicar la tabla delante del usuario. Al cerrar la última lista, todo vuelve.
+    3. *El foco no iba a la manija al abrir con el botón,* con T5 y la tabla. La manija compacta está oculta mientras entra la cortina. Ahora el foco va cuando aparece, si nadie lo movió a otra cosa.
+  - Batería:
+    - el foco al abrir con T5 y la tabla;
+    - el monitor por cuadro suma cerrar una lista con la reserva puesta.
+
+    Pasa también con 5 páginas a la vez.
+
+  **Verificación rev43 (corrección, 16/11): APROBADO.**
+  - Sin cruces:
+    - unos 15.000 cuadros sin carga;
+    - unos 55.000 cuadros con 4 navegadores a la vez;
+    - 120 cierres con carga.
+  - La reserva es igual con y sin carga, no oscila, devuelve lo que sobra y vuelve a cero.
+  - La decisión de conservar el lugar al pasar de lista no rompe ningún criterio.
+  - El foco al abrir va a la manija en 18 combinaciones y no le roba el foco al buscador.
+  - Simple ↔ pro con una lista abierta, sin regresiones.
+  - Arreglado después, en la batería: el monitor por cuadro multiplica la opacidad de los ancestros. Contaba como visibles los botones de una fila oculta por opacidad.
+  - Anotado para después (baja):
+    - con T5 abierta y el foco afuera, Esc cierra primero T5 (decidido en rev32);
+    - las 23 capas sin estilo propio y la hoja vertical con muchas capas, anotadas arriba.
+  - Anotado para después (baja):
+    - en la hoja vertical con muchas capas (20) puede caerse una capa del comparador, porque la distribución se corta en la primera que no entra;
+    - 23 capas sin estilo propio siguen mostrando la leyenda por defecto de GeoServer («Red Square point», «Blue Line», «Grey Fill and Black Outline»): edificaciones, señalizaciones, puertos, aeropuertos, obras portuarias, salvado de obstáculos, alturas topográficas, energía, comunicación, actividades económicas, curvas de nivel, muros de embalse, suelos y países limítrofes.
 - [ ] **T7 · Link compartible** — `aprobado`
   - Capas, zoom, centro, selección y modo quedan en la URL.
 - [ ] **T8 · Vista 3D explotada** — `aprobado` (último; se corta si no llega)

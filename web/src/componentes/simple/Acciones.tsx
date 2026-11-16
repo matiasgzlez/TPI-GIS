@@ -1,4 +1,4 @@
-import { HandGrabbing, MapPinPlus, Printer, Question, Ruler, SelectionPlus, X } from '@phosphor-icons/react';
+import { HandGrabbing, MapPinPlus, Printer, Question, Ruler, SelectionPlus, SplitHorizontal, X } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { Modo } from '../../herramientas';
 import { RESORTE, RESORTE_PANEL } from '../../movimiento';
@@ -21,7 +21,7 @@ const PISTAS = Object.fromEntries(Object.entries(HERRAMIENTAS_SIMPLES).map(([m, 
 
 // `sinPista`: con el formulario de una obra (o la impresión) abierto, la burbuja no se superpone con él.
 // "Imprimir" no es una herramienta del mapa sino una acción: va aparte, después de una línea.
-export default function Acciones({ modo, onModo, sinPista, imprimiendo, onImprimir }: { modo: Modo; onModo: (modo: Modo) => void; sinPista?: boolean; imprimiendo?: boolean; onImprimir?: () => void }) {
+export default function Acciones({ modo, onModo, sinPista, imprimiendo, onImprimir, comparando, onComparar }: { modo: Modo; onModo: (modo: Modo) => void; sinPista?: boolean; imprimiendo?: boolean; onImprimir?: () => void; comparando?: boolean; onComparar?: () => void }) {
   const midiendo = modo === 'distancia' || modo === 'area';
   return (
     <div className="flex flex-col items-center gap-3">
@@ -77,9 +77,24 @@ export default function Acciones({ modo, onModo, sinPista, imprimiendo, onImprim
             </button>
           );
         })}
+        {(onImprimir || onComparar) && <span className="mx-1 my-3 w-px bg-[var(--linea)]" aria-hidden="true" />}
+        {/* Comparar (T6): la cortina que muestra dos cosas distintas, una de cada lado. */}
+        {onComparar && (
+          <button
+            type="button"
+            onClick={onComparar}
+            aria-pressed={!!comparando}
+            aria-label="Comparar dos mapas"
+            className={`relative flex h-[74px] w-[86px] flex-col items-center justify-center gap-1 rounded-[18px] text-[14px] font-semibold transition-colors duration-200 focus-visible:outline-2 max-sm:w-[64px] max-sm:text-[12.5px] ${
+              comparando ? 'bg-[var(--tinta)] text-[var(--superficie)]' : 'text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)]'
+            }`}
+          >
+            <SplitHorizontal size={30} weight={comparando ? 'fill' : 'duotone'} className="relative" />
+            <span className="relative">Comparar</span>
+          </button>
+        )}
         {onImprimir && (
           <>
-            <span className="mx-1 my-3 w-px bg-[var(--linea)]" aria-hidden="true" />
             <button
               type="button"
               onClick={onImprimir}

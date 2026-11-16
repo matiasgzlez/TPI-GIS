@@ -845,3 +845,329 @@ export function distancia(combo, entorno) {
     anotar('Esc cierra la animación', await panel.waitFor({ state: 'detached', timeout: 3000 }).then(() => true).catch(() => false));
   }, entorno, combo);
 }
+
+// --- Comparador deslizante (T6) ---
+export function comparador(combo, entorno) {
+  return envolver('comparador', combo, async ({ p, anotar, informe }) => {
+    const simple = combo.modo === 'simple';
+    const estado = () => p.evaluate(() => {
+      const v = window.__visor(); const c = v.comparacion;
+      return {
+        abierto: !!c, titulos: c?.titulos ?? null, fraccion: c?.fraccion ?? null, ancho: v.mapa.getSize()[0],
+        visibles: [...v.visibles].sort(), derechaVisible: v.wmsDerecha.getVisible(),
+        sldDer: v.wmsDerecha.getSource().get('sld') ?? '', sldIzq: v.wms.getSource().get('sld') ?? '',
+      };
+    });
+    const inicial = await estado();
+    await esperarQuietud(p);
+    await p.getByRole('button', { name: simple ? 'Comparar dos mapas' : /^Comparar dos juegos/ }).click();
+    const manija = p.getByRole('slider', { name: /Cortina/ });
+    await manija.waitFor({ timeout: 5000 });
+    // La cortina entra desde la derecha hasta el medio del lugar libre (resorte de ~1,5 s).
+    await p.waitForFunction(() => { const m = document.querySelector('[role=slider][aria-label^="Cortina"]'); return Math.abs(Number(m?.getAttribute('aria-valuenow')) - 50) <= 2; }, null, { timeout: 5000 }).catch(() => {});
+    await esperarMapa(p);
+    const e = await estado();
+    anotar('abre con Natural vs. Humano', e.abierto && e.titulos?.[0] === 'Natural' && e.titulos?.[1] === (simple ? 'Lo que hizo la gente' : 'Humano'), JSON.stringify(e.titulos));
+    anotar('la izquierda es el mapa (Natural) y la derecha su propia capa (Humano)', e.sldIzq.includes('<Name>veg_arborea<') && !e.sldIzq.includes('<Name>veg_cultivos<') && e.derechaVisible && e.sldDer.includes('<Name>veg_cultivos<') && !e.sldDer.includes('<Name>veg_arborea<'));
+    anotar('la cortina queda en el medio del lugar libre', Math.abs(Number(await manija.getAttribute('aria-valuenow')) - 50) <= 2, `${await manija.getAttribute('aria-valuenow')} %`);
+    anotar('el foco va a la manija', await p.evaluate(() => document.activeElement?.getAttribute('role') === 'slider'));
+    // Nada del comparador queda debajo de un panel.
+    const pisados = await p.evaluate(() => {
+      const propios = [...document.querySelectorAll('.comparador [role=slider], .comparador button')].map(x => ({ n: x.getAttribute('aria-label')?.split(':')[0], r: x.getBoundingClientRect() }));
+      const paneles = [...document.querySelectorAll('.interfaz .panel')].filter(x => !x.closest('.comparador')).map(x => x.getBoundingClientRect()).filter(r => r.width > 0);
+      const cruza = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+      return propios.filter(x => paneles.some(r => cruza(x.r, r))).map(x => x.n);
+    });
+    anotar('la manija y los nombres de los lados no quedan debajo de un panel', pisados.length === 0, pisados.join(', '));
+    await capturar(p, informe, entorno.salida, 'abierto');
+    // Teclado: Inicio y Fin llevan a los bordes del lugar libre; Re Pág mueve un 10 %.
+    await manija.focus();
+    await p.keyboard.press('End');
+    const fin = Number(await manija.getAttribute('aria-valuenow'));
+    await p.keyboard.press('Home');
+    const inicio = Number(await manija.getAttribute('aria-valuenow'));
+    await p.keyboard.press('PageUp');
+    const paso = Number(await manija.getAttribute('aria-valuenow'));
+    anotar('la manija se mueve con el teclado (Fin, Inicio, Re Pág)', fin === 100 && inicio === 0 && paso === 10, `${fin} · ${inicio} · ${paso}`);
+    // Arrastrar la manija.
+    const caja = await manija.boundingBox();
+    await p.mouse.move(caja.x + caja.width / 2, caja.y + caja.height / 2);
+    await p.mouse.down();
+    await p.mouse.move(caja.x + caja.width / 2 + 200, caja.y + caja.height / 2, { steps: 6 });
+    await p.mouse.up();
+    const arrastrada = Number(await manija.getAttribute('aria-valuenow'));
+    anotar('la manija se arrastra', arrastrada > paso + 5, `${paso} → ${arrastrada} %`);
+    for (let i = 0; i < 20 && Number(await manija.getAttribute('aria-valuenow')) > 50; i++) await p.keyboard.press('ArrowLeft');
+    // Un par listo desde el nombre de un lado.
+    await p.getByRole('button', { name: /^Izquierda:/ }).click();
+    const lista = p.getByRole('dialog', { name: /izquierda|Lado izquierdo/ });
+    await lista.waitFor({ timeout: 3000 });
+    await capturar(p, informe, entorno.salida, 'lista');
+    const vLista = await axe(p);
+    anotar('axe sin violaciones (lista de un lado abierta)', vLista.length === 0, vLista.join(' · '));
+    // Tab hasta salir de la lista: se cierra (antes quedaba abierta con el foco en el buscador).
+    for (let i = 0; i < 80 && await p.evaluate(() => !!document.activeElement?.closest('.comparador [role=dialog]') || /^Izquierda:/.test(document.activeElement?.getAttribute('aria-label') ?? '')); i++) await p.keyboard.press('Tab');
+    const seCerro = await lista.waitFor({ state: 'detached', timeout: 2000 }).then(() => true).catch(() => false);
+    anotar('la lista de un lado se cierra cuando el foco sale con Tab', seCerro);
+    // Con una lista abierta, tocar el otro lado abre la suya y la deja abierta (la que sale no la cierra).
+    await p.getByRole('button', { name: /^Izquierda:/ }).click();
+    await lista.waitFor({ timeout: 3000 });
+    await p.getByRole('button', { name: /^Derecha:/ }).click();
+    const listaDer = p.getByRole('dialog', { name: /derecha|Lado derecho/ });
+    await pausa(700);
+    anotar('pasar de un lado al otro deja abierta la lista nueva', await listaDer.isVisible().catch(() => false) && await p.evaluate(() => !!document.activeElement?.closest('.comparador [role=dialog]')));
+    await p.getByRole('button', { name: /^Izquierda:/ }).click();
+    await lista.waitFor({ timeout: 3000 });
+    await pausa(400);
+    await lista.getByRole('button', { name: /^(Monte|Bosques)\s+vs\./ }).click();
+    await esperarMapa(p);
+    const par = await estado();
+    anotar('el par «Monte vs. Campos sembrados» pone los dos lados', par.titulos?.[0] === (simple ? 'Bosques' : 'Monte') && par.titulos?.[1] === 'Campos sembrados', JSON.stringify(par.titulos));
+    anotar('al elegir, el foco vuelve al nombre del lado', await p.evaluate(() => /^Izquierda:/.test(document.activeElement?.getAttribute('aria-label') ?? '')));
+    // La consulta por punto pregunta por las capas del lado donde se toca.
+    const pedidos = [];
+    const oir = r => { if (/GetFeatureInfo/i.test(r.url())) pedidos.push(new URL(r.url()).searchParams.get('QUERY_LAYERS') ?? ''); };
+    p.on('request', oir);
+    await p.keyboard.press('2');
+    const corte = par.fraccion * par.ancho;
+    const y = await p.evaluate(() => { const m = document.querySelector('[role=slider][aria-label^="Cortina"]').getBoundingClientRect(); return m.top + m.height / 2 + 90; });
+    await p.mouse.click(corte + 70, y);
+    await p.waitForFunction(() => !!document.querySelector('[aria-label="Cerrar resultados"]') || /Nada seleccionado/.test(document.body.innerText) === false, null, { timeout: 8000 }).catch(() => {});
+    await pausa(600);
+    await p.mouse.click(corte - 70, y);
+    await pausa(1200);
+    p.off('request', oir);
+    const der = pedidos.find(q => q.includes('veg_cultivos')); const izq = pedidos.find(q => q.includes('veg_arborea'));
+    anotar('la consulta por punto usa las capas del lado tocado', !!der && !der.includes('veg_arborea') && !!izq && !izq.includes('veg_cultivos'), pedidos.join(' | '));
+    const v = await axe(p);
+    anotar('axe sin violaciones (comparador)', v.length === 0, v.join(' · '));
+    // Esc: primero la herramienta y los resultados, después la cortina; el mapa vuelve a sus capas.
+    await p.mouse.move(5, 400);
+    await p.keyboard.press('Escape');
+    const sigue = (await estado()).abierto;
+    await p.keyboard.press('Escape');
+    await p.waitForFunction(() => !window.__visor().comparacion, null, { timeout: 2000 }).catch(() => {});
+    const cerrado = await estado();
+    anotar('Esc cierra primero la herramienta y después la cortina', sigue && !cerrado.abierto);
+    anotar('al cerrar, el mapa vuelve a las capas de antes', JSON.stringify(cerrado.visibles) === JSON.stringify(inicial.visibles) && !cerrado.derechaVisible, cerrado.visibles.join(','));
+    anotar('sin recortes que queden en el mapa', await p.evaluate(() => ![...document.querySelectorAll('canvas')].some(c => c.style.clipPath)));
+    // Con la animación de distancia (T5) abierta, la fila de los lados queda debajo de su panel.
+    await p.getByRole('button', { name: /Ver RN11|Ver la ruta 11/ }).first().click();
+    await p.waitForFunction(() => /Localidades, de la más|Pueblos, del más/.test(document.body.innerText), null, { timeout: 30000 });
+    await p.getByRole('button', { name: /Animar la distancia|Ver crecer la franja/ }).click();
+    await p.locator('.crecer-franja').waitFor({ timeout: 5000 });
+    await p.getByRole('button', { name: simple ? 'Comparar dos mapas' : /^Comparar dos juegos/ }).click();
+    await p.getByRole('slider', { name: /Cortina/ }).waitFor({ timeout: 5000 });
+    await pausa(700);
+    const conT5 = await p.evaluate(() => {
+      const panel = document.querySelector('.crecer-franja').getBoundingClientRect();
+      const fila = [...document.querySelectorAll('.comparador button')].map(b => b.getBoundingClientRect());
+      return { panel: Math.round(panel.bottom), fila: Math.round(Math.min(...fila.map(r => r.top))) };
+    });
+    anotar('con la animación de distancia, la fila de los lados queda debajo de su panel', conT5.fila >= conT5.panel, `panel hasta ${conT5.panel} · fila desde ${conT5.fila}`);
+    await capturar(p, informe, entorno.salida, 'con-animacion');
+    if (!simple) {
+      // Pro con la animación y la tabla: el lugar libre queda bajo. Ni la manija ni la fila de los lados se
+      // cruzan con ningún panel a la vista (T5, la tabla, el zoom y minimapa, el inspector…), en los bordes y
+      // mientras la tabla y el zoom llegan a su lugar.
+      const cruces = () => p.evaluate(() => {
+        const visible = el => { const r = el.getBoundingClientRect(); const e = getComputedStyle(el); if (!(r.width > 1 && r.height > 1 && e.visibility !== 'hidden')) return false; let op = 1; for (let x = el; x && x !== document.body; x = x.parentElement) op *= Number(getComputedStyle(x).opacity); return op > 0.05; };
+        const propios = [document.querySelector('.comparador-manija'), ...document.querySelectorAll('.comparador > div > button, .comparador [role=dialog]')].filter(Boolean).filter(visible);
+        const ajenos = [...document.querySelectorAll('.interfaz .panel, .interfaz .minimapa')].filter(el => !el.closest('.comparador') && visible(el));
+        const cruza = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+        const malos = [];
+        for (const a of propios) for (const b of ajenos) if (cruza(a.getBoundingClientRect(), b.getBoundingClientRect())) malos.push(`${a.getAttribute('aria-label')?.split(':')[0] ?? a.className.split(' ')[0]} × ${b.getAttribute('aria-label') ?? b.className.split(' ').slice(0, 2).join('.')}`);
+        return [...new Set(malos)];
+      });
+      const manija = () => p.locator('.comparador-manija');
+      const revisar = async (que) => { const c = await cruces(); anotar(`nada del comparador se cruza con un panel (${que})`, c.length === 0, c.slice(0, 4).join(' · ')); };
+      await manija().focus();
+      await p.keyboard.press('t');
+      await p.locator('section[aria-label^="Tabla de datos:"]').waitFor({ timeout: 10000 });
+      await pausa(900);
+      for (const tecla of ['End', 'Home']) { await manija().focus(); await p.keyboard.press(tecla); await pausa(250); await revisar(`T5 y tabla, ${tecla}`); }
+      // Las listas de los lados, en cada borde, tampoco pisan ningún panel.
+      const listas = async (que) => {
+        for (const tecla of ['End', 'Home']) {
+          for (const lado of ['Izquierda', 'Derecha']) {
+            await manija().focus(); await p.keyboard.press(tecla); await pausa(200);
+            await p.getByRole('button', { name: new RegExp(`^${lado}:`) }).click();
+            await p.locator('.comparador [role=dialog]').waitFor({ timeout: 3000 });
+            await pausa(1900);
+            await revisar(`${que}, lista ${lado.toLowerCase()} en ${tecla}`);
+            // De su lado (la izquierda empieza antes del borde derecho de su nombre; la derecha termina después del
+            // borde izquierdo del suyo) y con alto usable: se ven al menos 3 opciones.
+            const forma = await p.evaluate(l => {
+              const d = document.querySelector('.comparador [role=dialog]').getBoundingClientRect();
+              const izq = document.querySelector('button[aria-label^="Izquierda:"]').getBoundingClientRect();
+              const der = document.querySelector('button[aria-label^="Derecha:"]').getBoundingClientRect();
+              const ladoOk = l === 'Izquierda' ? d.left < izq.right : d.right > der.left;
+              const visibles = [...document.querySelectorAll('.comparador [role=dialog] button')].filter(b => { const r = b.getBoundingClientRect(); return r.top >= d.top - 1 && r.bottom <= d.bottom + 1; }).length;
+              return { ladoOk, visibles };
+            }, lado);
+            anotar(`${que}, lista ${lado.toLowerCase()} en ${tecla}: de su lado y con 3 opciones a la vista`, forma.ladoOk && forma.visibles >= 3, JSON.stringify(forma));
+            await p.keyboard.press('Escape'); await pausa(400);
+          }
+        }
+      };
+      await listas('T5 y tabla');
+      // El foco al abrir la cortina con el botón, con T5 y la tabla (la manija puede estar oculta mientras entra).
+      await p.getByRole('button', { name: /^Comparar dos juegos/ }).click();
+      await p.waitForFunction(() => !window.__visor().comparacion, null, { timeout: 3000 });
+      await pausa(300);
+      await p.getByRole('button', { name: /^Comparar dos juegos/ }).click();
+      await pausa(2400);
+      anotar('al abrir con el botón, con T5 y la tabla, el foco va a la manija', await p.evaluate(() => document.activeElement?.classList.contains('comparador-manija')));
+      // Sin lugar, pasar de una lista a la otra: la nueva conserva el lugar (tabla achicada, controles ocultos).
+      await p.getByRole('button', { name: /^Izquierda:/ }).click();
+      await pausa(1900);
+      await p.getByRole('button', { name: /^Derecha:/ }).click();
+      await pausa(1900);
+      const cambio = await p.evaluate(() => {
+        const d = document.querySelector('.comparador [role=dialog]:not([inert])').getBoundingClientRect();
+        return [...document.querySelectorAll('.comparador [role=dialog]:not([inert]) button')].filter(b => { const r = b.getBoundingClientRect(); return r.top >= d.top - 1 && r.bottom <= d.bottom + 1; }).length;
+      });
+      await revisar('T5 y tabla, de la lista izquierda a la derecha');
+      anotar('T5 y tabla, de la lista izquierda a la derecha: la nueva muestra 3 opciones', cambio >= 3, `${cambio} opciones`);
+      // Cerrar una y abrir la otra mientras la tabla todavía vuelve a su alto: la nueva igual tiene lugar.
+      await p.keyboard.press('Escape'); await pausa(350);
+      await p.getByRole('button', { name: /^Izquierda:/ }).click();
+      await pausa(2000);
+      const tarde = await p.evaluate(() => {
+        const d = document.querySelector('.comparador [role=dialog]:not([inert])').getBoundingClientRect();
+        return [...document.querySelectorAll('.comparador [role=dialog]:not([inert]) button')].filter(b => { const r = b.getBoundingClientRect(); return r.top >= d.top - 1 && r.bottom <= d.bottom + 1; }).length;
+      });
+      anotar('T5 y tabla, cerrar una lista y abrir la otra a los 350 ms: la nueva muestra 3 opciones', tarde >= 3, `${tarde} opciones`);
+      // Con la cortina en Fin, cerrar la izquierda y abrir la derecha enseguida (0 y 200 ms): la tabla no queda
+      // achicada de más (antes la reserva se sumaba dos veces y la tabla llegaba a 0 px).
+      for (const demora of [0, 200]) {
+        await p.keyboard.press('Escape'); await pausa(400);
+        await manija().focus(); await p.keyboard.press('End'); await pausa(300);
+        await p.getByRole('button', { name: /^Izquierda:/ }).click();
+        await pausa(1600);
+        await p.keyboard.press('Escape'); await pausa(demora);
+        await p.getByRole('button', { name: /^Derecha:/ }).click();
+        await pausa(2600);
+        const estado = await p.evaluate(() => {
+          const d = document.querySelector('.comparador [role=dialog]:not([inert])').getBoundingClientRect();
+          const opciones = [...document.querySelectorAll('.comparador [role=dialog]:not([inert]) button')].filter(b => { const r = b.getBoundingClientRect(); return r.top >= d.top - 1 && r.bottom <= d.bottom + 1; }).length;
+          const tabla = document.querySelector('section[aria-label^="Tabla de datos:"]')?.getBoundingClientRect().height ?? 0;
+          return { opciones, tabla: Math.round(tabla), lista: Math.round(d.height) };
+        });
+        anotar(`Fin, de la izquierda a la derecha a los ${demora} ms: 3 opciones y la tabla a la vista`, estado.opciones >= 3 && estado.tabla >= 40, JSON.stringify(estado));
+      }
+      await p.keyboard.press('Escape'); await pausa(400);
+      await manija().focus(); await p.keyboard.press('Home'); await pausa(300);
+      await p.getByRole('button', { name: /^Izquierda:/ }).click(); await pausa(1600);
+      await revisar('T5 y tabla, lista abierta a los 350 ms de cerrar la otra');
+      await p.keyboard.press('Escape'); await pausa(900);
+      anotar('al cerrar las listas no queda reserva ni controles ocultos', await p.evaluate(() => { const i = document.querySelector('.interfaz'); return !i.style.getPropertyValue('--reserva-comparador') && !i.hasAttribute('data-lista-sin-lugar'); }));
+      await capturar(p, informe, entorno.salida, 'con-animacion-y-tabla');
+      // Agrandar la tabla con la cortina a la derecha: se mide mientras sube y cuando llegó.
+      await manija().focus(); await p.keyboard.press('End');
+      await p.getByRole('button', { name: 'Agrandar la tabla' }).click();
+      await pausa(300); await revisar('T5 y tabla agrandándose');
+      await pausa(800); await listas('T5 y tabla agrandada');
+      await pausa(800); await revisar('T5 y tabla agrandada');
+      for (const tecla of ['End', 'Home']) { await manija().focus(); await p.keyboard.press(tecla); await pausa(250); await revisar(`T5 y tabla agrandada, ${tecla}`); }
+      await capturar(p, informe, entorno.salida, 'con-animacion-y-tabla-grande');
+      // Sin T5: tabla cerrada, cortina a la derecha, y se abre la tabla (el zoom sube con ella).
+      await p.getByRole('button', { name: /Cerrar la animación/ }).first().click();
+      await p.getByRole('button', { name: 'Achicar la tabla' }).click();
+      await p.getByRole('button', { name: /^Cerrar la tabla de datos/ }).first().click();
+      await pausa(600);
+      await manija().focus(); await p.keyboard.press('End'); await pausa(250);
+      await p.keyboard.press('t');
+      await pausa(300); await revisar('tabla abriéndose con la cortina a la derecha');
+      await pausa(800); await revisar('tabla abierta con la cortina a la derecha');
+      await manija().focus(); await p.keyboard.press('End'); await pausa(250); await revisar('tabla abierta, End');
+      await p.getByRole('button', { name: 'Agrandar la tabla' }).click();
+      await pausa(1000); await revisar('tabla agrandada con la cortina a la derecha');
+      // Monitor en cada cuadro durante las transiciones: cerrar la tabla con la cortina a la derecha, y abrir la
+      // cortina con T5 y la tabla agrandada (entra con un resorte desde el borde). Cuenta los cuadros con más
+      // de 2 px de cruce entre la manija o la fila y cualquier panel.
+      await p.evaluate(() => {
+        window.__cruces = []; window.__monitor = true;
+        const visible = el => { const r = el.getBoundingClientRect(); const e = getComputedStyle(el); if (!(r.width > 1 && r.height > 1 && e.visibility !== 'hidden')) return false; let op = 1; for (let x = el; x && x !== document.body; x = x.parentElement) op *= Number(getComputedStyle(x).opacity); return op > 0.05; };
+        const t0 = performance.now();
+        // Se lee justo antes del pintado: un ResizeObserver corre después de todos los requestAnimationFrame del
+        // cuadro (los de la app que acomodan la cortina), así se mide lo que de verdad se ve. Un elemento propio
+        // cambia de ancho en cada cuadro para dispararlo.
+        const testigo = document.createElement('div');
+        Object.assign(testigo.style, { position: 'fixed', left: '-10px', top: '0', height: '1px', width: '1px' });
+        document.body.appendChild(testigo);
+        const leer = () => {
+          const propios = [document.querySelector('.comparador-manija'), ...document.querySelectorAll('.comparador > div > button, .comparador [role=dialog]')].filter(Boolean).filter(visible);
+          const ajenos = [...document.querySelectorAll('.interfaz .panel, .interfaz .minimapa')].filter(el => !el.closest('.comparador') && visible(el));
+          for (const a of propios) for (const b of ajenos) {
+            const r = a.getBoundingClientRect(); const o = b.getBoundingClientRect();
+            const dx = Math.min(r.right, o.right) - Math.max(r.left, o.left); const dy = Math.min(r.bottom, o.bottom) - Math.max(r.top, o.top);
+            if (dx > 2 && dy > 2) { const c = x => `[${Math.round(x.left)},${Math.round(x.top)},${Math.round(x.right)},${Math.round(x.bottom)}]`; window.__cruces.push(`${Math.round(performance.now() - t0)} ms ${a.getAttribute('aria-label')?.split(':')[0] ?? 'manija'} ${c(r)} × ${b.getAttribute('aria-label') ?? b.className.split(' ').slice(0, 2).join('.')} ${c(o)} ${document.querySelector('.comparador [role=dialog]') ? 'con lista' : ''}`); break; }
+          }
+        };
+        new ResizeObserver(() => { if (window.__monitor) leer(); }).observe(testigo);
+        const paso = () => {
+          if (!window.__monitor) { testigo.remove(); return; }
+          testigo.style.width = testigo.style.width === '1px' ? '2px' : '1px';
+          requestAnimationFrame(paso);
+        };
+        requestAnimationFrame(paso);
+      });
+      await manija().focus(); await p.keyboard.press('End'); await pausa(200);
+      await p.getByRole('button', { name: 'Achicar la tabla' }).click();
+      await pausa(800);
+      await p.getByRole('button', { name: 'Agrandar la tabla' }).click();
+      await pausa(800);
+      await p.keyboard.press('t');
+      await pausa(1200);
+      await p.getByRole('button', { name: /Animar la distancia/ }).click();
+      await p.locator('.crecer-franja').waitFor({ timeout: 5000 });
+      await p.getByRole('button', { name: /^Comparar dos juegos/ }).click();
+      await p.waitForFunction(() => !window.__visor().comparacion, null, { timeout: 3000 });
+      await p.keyboard.press('t');
+      await p.getByRole('button', { name: 'Agrandar la tabla' }).click();
+      await pausa(800);
+      await p.getByRole('button', { name: /^Comparar dos juegos/ }).click();
+      await pausa(2000);
+      await manija().focus(); await p.keyboard.press('End'); await pausa(300);
+      await p.keyboard.press('t');
+      await pausa(1200);
+      // Abrir T5 con la tabla agrandada y la cortina a la derecha: la cortina no se mueve sola.
+      await p.getByRole('button', { name: /Cerrar la animación/ }).first().click();
+      await pausa(600);
+      await manija().focus(); await p.keyboard.press('t');
+      await p.locator('section[aria-label^="Tabla de datos:"]').waitFor({ timeout: 10000 });
+      await pausa(600);
+      await p.getByRole('button', { name: 'Agrandar la tabla' }).click();
+      await pausa(800);
+      await manija().focus(); await p.keyboard.press('End'); await pausa(300);
+      const antesT5 = await manija().getAttribute('aria-valuenow');
+      await p.getByRole('button', { name: /Animar la distancia/ }).click();
+      await pausa(1500);
+      const despuesT5 = await manija().getAttribute('aria-valuenow');
+      anotar('al abrir T5 con la tabla agrandada, la cortina no se mueve sola', antesT5 === despuesT5, `${antesT5} → ${despuesT5} %`);
+      await p.getByRole('button', { name: 'Achicar la tabla' }).click();
+      await pausa(800);
+      await manija().focus(); await p.keyboard.press('t');
+      await pausa(800);
+      // Abrir la tabla con T5 y la cortina a la derecha, y abrir la cortina con T5 y la tabla compacta.
+      await manija().focus(); await p.keyboard.press('End'); await pausa(300);
+      await p.keyboard.press('t');
+      await pausa(1200);
+      await p.getByRole('button', { name: /^Comparar dos juegos/ }).click();
+      await p.waitForFunction(() => !window.__visor().comparacion, null, { timeout: 3000 });
+      await pausa(300);
+      await p.getByRole('button', { name: /^Comparar dos juegos/ }).click();
+      await pausa(2000);
+      await manija().focus(); await p.keyboard.press('t');
+      await pausa(1200);
+      // Cerrar una lista con la reserva puesta (la tabla vuelve a crecer): la fila no salta encima de T5.
+      await p.getByRole('button', { name: /^Izquierda:/ }).click();
+      await pausa(1800);
+      await p.keyboard.press('Escape');
+      await pausa(1200);
+      const monitor = await p.evaluate(() => { window.__monitor = false; return window.__cruces; });
+      anotar('en cada cuadro de las transiciones (cerrar la tabla, abrir la cortina con T5 y la tabla agrandada), nada se cruza', monitor.length === 0, `${monitor.length} cuadros: ${monitor.slice(0, 4).join(' · ')}`);
+    }
+  }, entorno, combo);
+}

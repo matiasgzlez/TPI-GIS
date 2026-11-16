@@ -218,7 +218,7 @@ export default function PanelConfiguracion({ preferencias, onCambiar, oscuro, on
                 />
               </Grupo>
               <Grupo titulo="Atajos de teclado">
-                {[['/', 'Ir al buscador'], ['⌘ K', 'Ir al buscador'], ['1 – 6', 'Elegir herramienta'], ['P · ⌘P', simple ? 'Imprimir el mapa' : 'Exportar a PDF'], ...(simple ? [] : [['T', 'Abrir o cerrar la tabla de datos']]), ['Esc', 'Volver a navegar y cerrar resultados']].map(([tecla, texto]) => (
+                {[['/', 'Ir al buscador'], ['⌘ K', 'Ir al buscador'], ['1 – 6', 'Elegir herramienta'], ['P · ⌘P', simple ? 'Imprimir el mapa' : 'Exportar a PDF'], ...(simple ? [] : [['T', 'Abrir o cerrar la tabla de datos']]), ['C', simple ? 'Comparar dos mapas' : 'Abrir o cerrar el comparador'], ['Esc', 'Volver a navegar y cerrar resultados']].map(([tecla, texto]) => (
                   <div key={texto + tecla} className="flex items-center justify-between py-2 text-[15px]">
                     <span className="text-[var(--tinta-2)]">{texto}</span>
                     <kbd className="rounded-lg bg-[var(--superficie-2)] px-2.5 py-1 text-[13px] font-semibold">{tecla}</kbd>

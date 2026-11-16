@@ -4,7 +4,7 @@
 //
 //   npm run verificar                         nivel rápido (verificación de una corrección), ~3–5 min
 //   npm run verificar -- --nivel completo     cierre de ticket: la matriz entera y el alta por WFS-T
-//   opciones: --salida DIR · --url URL · --sin-build · --con-alta · --solo vista,tablero,consignas,teclado,exportar,integridad,calor,tabla,distancia,rendimiento · --paralelo N
+//   opciones: --salida DIR · --url URL · --sin-build · --con-alta · --solo vista,tablero,consignas,teclado,exportar,integridad,calor,tabla,distancia,comparador,rendimiento · --paralelo N
 //
 // Por defecto mide el build servido por nginx (http://localhost:8081, `docker compose up -d`), que es lo
 // que se presenta: carga más rápido que el servidor de desarrollo y tiene el proxy de WFS-T.
@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { enParalelo, lanzar } from './lib.mjs';
-import { calor, consignas, distancia, tabla, exportar, exportarIntegridad, rendimiento, tablero, teclado, vista } from './pruebas.mjs';
+import { calor, comparador, consignas, distancia, tabla, exportar, exportarIntegridad, rendimiento, tablero, teclado, vista } from './pruebas.mjs';
 
 const args = process.argv.slice(2);
 const opcion = (nombre, defecto) => { const i = args.indexOf(`--${nombre}`); return i >= 0 ? args[i + 1] : defecto; };
@@ -58,6 +58,7 @@ const PLAN = nivel === 'completo'
     calor: elegir([['simple', 1366, 768, 'claro'], ['simple', 2560, 1440, 'oscuro'], ['pro', 1536, 864, 'oscuro'], ['pro', 2560, 1440, 'claro']]),
     tabla: elegir([['pro', 1366, 768, 'claro'], ['pro', 1536, 864, 'oscuro'], ['pro', 2560, 1440, 'claro']]),
     distancia: elegir([['simple', 1366, 768, 'claro'], ['simple', 2560, 1440, 'oscuro'], ['pro', 1536, 864, 'oscuro'], ['pro', 2560, 1440, 'claro']]),
+    comparador: elegir([['simple', 1366, 768, 'oscuro'], ['simple', 2560, 1440, 'claro'], ['pro', 1366, 768, 'claro'], ['pro', 1536, 864, 'oscuro'], ['pro', 2560, 1440, 'oscuro']]),
     rendimiento: elegir([['simple', 1440, 900, 'claro'], ['pro', 1440, 900, 'claro'], ['simple', 2560, 1440, 'claro'], ['pro', 2560, 1440, 'claro']]),
   }
   : {
@@ -70,9 +71,10 @@ const PLAN = nivel === 'completo'
     calor: elegir([['simple', 1366, 768, 'claro'], ['pro', 2560, 1440, 'oscuro']]),
     tabla: elegir([['pro', 1366, 768, 'oscuro']]),
     distancia: elegir([['simple', 1536, 864, 'claro']]),
+    comparador: elegir([['pro', 1536, 864, 'claro']]),
     rendimiento: elegir([['simple', 1440, 900, 'claro'], ['pro', 1440, 900, 'claro']]),
   };
-const PRUEBAS = { vista, tablero, consignas, teclado, exportar, integridad: exportarIntegridad, calor, tabla, distancia, rendimiento };
+const PRUEBAS = { vista, tablero, consignas, teclado, exportar, integridad: exportarIntegridad, calor, tabla, distancia, comparador, rendimiento };
 
 const navegador = await lanzar();
 const entorno = { navegador, url, salida, conAlta };

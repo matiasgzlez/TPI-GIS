@@ -10,7 +10,7 @@ import { getArea, getLength } from 'ol/sphere';
 import { unByKey } from 'ol/Observable';
 import type { EventsKey } from 'ol/events';
 import { URL_WFS, WORKSPACE, tituloDeCapa } from './config';
-import { capasVisibles, consultarPuntoWms, denominadorWms, estiloDibujo, type Visor } from './visor';
+import { capasDerecha, capasEn, capasVisibles, consultarPuntoWms, corteEnCoordenada, denominadorWms, estiloDibujo, type Visor } from './visor';
 import { filtroVisible } from './estilos';
 
 export type Modo = 'navegar' | 'punto' | 'rectangulo' | 'distancia' | 'area' | 'alta';
@@ -159,11 +159,12 @@ interface FeatureGeoJSON {
   properties: Record<string, unknown>;
 }
 
-// WMS GetFeatureInfo sobre todas las capas visibles; GeoServer devuelve hasta 10 entidades.
+// WMS GetFeatureInfo sobre todas las capas visibles; GeoServer devuelve hasta 10 entidades. Con la
+// cortina (T6), las que se ven de ese lado.
 async function consultarPunto(visor: Visor, coordenada: number[]): Promise<Consulta> {
-  const nombres = capasVisibles(visor);
+  const { nombres, derecha } = capasEn(visor, visor.mapa.getPixelFromCoordinate(coordenada));
   if (!nombres.length) return { origen: 'punto', capas: [] };
-  const datos = await consultarPuntoWms(visor, coordenada, nombres);
+  const datos = await consultarPuntoWms(visor, coordenada, nombres, 10, undefined, derecha);
   const porCapa = new Map<string, FeatureGeoJSON[]>();
   for (const f of datos.features as FeatureGeoJSON[]) {
     const capa = f.id.split('.')[0];
@@ -203,10 +204,26 @@ async function consultarCapaVisible(visor: Visor, capa: string, extension: numbe
   return armarResultado(capa, datos.numberMatched ?? datos.totalFeatures ?? datos.features.length, datos);
 }
 
-// Una consulta por cada capa visible, con un límite de entidades por capa.
+// Una consulta por cada capa visible, con un límite de entidades por capa. Con la cortina (T6), cada capa
+// se consulta solo en la parte del rectángulo donde se ve: las de un solo lado, hasta el corte.
 async function consultarRectangulo(visor: Visor, extension: number[]): Promise<Consulta> {
-  const nombres = [...capasVisibles(visor)].reverse();
-  const resultados = await Promise.all(nombres.map(capa => consultarCapaVisible(visor, capa, extension)));
+  const izquierda = [...capasVisibles(visor)].reverse();
+  const derecha = [...capasDerecha(visor)].reverse();
+  const corte = corteEnCoordenada(visor);
+  const nombres = [...new Set([...izquierda, ...derecha])];
+  const parte = (capa: string) => {
+    if (corte === null) return extension;
+    const [x1, y1, x2, y2] = extension;
+    const enIzquierda = izquierda.includes(capa);
+    const enDerecha = derecha.includes(capa);
+    if (enIzquierda && enDerecha) return extension;
+    const recorte = enIzquierda ? [x1, y1, Math.min(x2, corte), y2] : [Math.max(x1, corte), y1, x2, y2];
+    return recorte[2] > recorte[0] ? recorte : null;
+  };
+  const resultados = await Promise.all(nombres.map(capa => {
+    const zona = parte(capa);
+    return zona ? consultarCapaVisible(visor, capa, zona) : null;
+  }));
   return { origen: 'rectangulo', capas: mostrar(visor, resultados.filter((r): r is ResultadoCapa => !!r && r.total > 0)) };
 }
 

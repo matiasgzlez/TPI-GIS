@@ -200,6 +200,25 @@ const REGLAS: Record<string, Regla[]> = {
   isla: [{ titulo: 'Isla', simbolo: relleno('#dfe3d5') }],
   // Con el estilo por defecto de GeoServer eran manchas negras y cuadrados rojos en la vista inicial.
   veg_hidrofila: [{ titulo: 'Vegetación hidrófila', hasta: REGION, simbolo: relleno('#b9d3c4', 0.55) }],
+  // El resto de la vegetación también tenía el estilo por defecto (gris con borde negro): monte y cultivos
+  // eran la misma mancha, y en el comparador (T6) "Monte vs. Campos sembrados" no se distinguía. Colores de
+  // atlas: monte verde, arbustos verde claro, cultivos trigo, suelo desnudo arena; sin borde (son miles de
+  // polígonos chicos).
+  veg_arborea: [{ titulo: 'Vegetación arbórea', simbolo: relleno('#6f9e5c', 0.62) }],
+  veg_arbustiva: [{ titulo: 'Vegetación arbustiva', simbolo: relleno('#a9c27f', 0.55) }],
+  veg_cultivos: [{ titulo: 'Cultivos', simbolo: relleno('#e2b84f', 0.6) }],
+  // Con el estilo por defecto (línea azul) las vías, los caminos chicos y los cables se confundían con ríos
+  // en el lado "Humano" del comparador (T6), y la leyenda decía "Blue Line". Convención de atlas: tren en
+  // gris oscuro a trazos, caminos secundarios en marrón claro fino, alta tensión en violeta punto y raya.
+  red_ferroviaria: [{ titulo: 'Vía férrea', simbolo: linea('#4a4f57', 1.3, '6 3') }],
+  // Son 22 000 tramos: de lejos eran una maraña; desde 1:1.500.000, como los caminos de tierra.
+  vias_secundarias: [{ titulo: 'Vía secundaria', hasta: 1_500_000, simbolo: linea('#a88c76', 0.7) }],
+  lineas_de_conduccion_ene: [{ titulo: 'Línea de alta tensión', simbolo: linea('#8a63c2', 1.1, '8 3 2 3') }],
+  // 21 establecimientos (criaderos, tambos, estancias): en el juego "Campos sembrados" del comparador su
+  // leyenda decía "Red Square point".
+  actividades_agropecuarias: [{ titulo: 'Establecimiento agropecuario', simbolo: punto('#8a6a1f', 11, 'triangle') }],
+  ejido: [{ titulo: 'Ejido urbano', simbolo: relleno('#efc4bd', 0.55, ['#c0786d', 0.6]) }],
+  veg_suelo_desnudo: [{ titulo: 'Suelo desnudo', simbolo: relleno('#cdb48f', 0.55) }],
   infraestructura_hidro: [{ titulo: 'Infraestructura hídrica', hasta: 1_500_000, simbolo: punto(AGUA, 7, 'square') }],
   edif_educacion: [{ titulo: 'Establecimiento educativo', hasta: 1_500_000, simbolo: punto('#3d6fb0', 7) }],
   edificio_de_salud_ips: [{ titulo: 'Establecimiento de salud', hasta: 3_000_000, simbolo: punto('#2f8f6b', 9, 'cross') }],
@@ -280,7 +299,7 @@ const TITULOS_SIMPLES: Record<string, string> = {
   'Camino pavimentado provincial': 'Ruta provincial', 'Camino pavimentado nacional': 'Ruta nacional', Autopista: 'Autopista',
   'Establecimiento educativo': 'Escuela', 'Establecimiento de salud': 'Hospital', Seguridad: 'Policía o bomberos', Edificación: 'Casa o galpón',
   'Marca o señal': 'Mojón', 'Punto del terreno': 'Punto medido', 'Vegetación hidrófila': 'Plantas de agua', 'Infraestructura hídrica': 'Obra de agua',
-  'Provincia del Chaco': 'El Chaco', 'Otras provincias': 'Otras provincias',
+  'Vía férrea': 'Vías del tren', 'Vía secundaria': 'Camino chico', 'Línea de alta tensión': 'Cable de alta tensión', 'Ejido urbano': 'Zona urbana', 'Establecimiento agropecuario': 'Campo, tambo o criadero', 'Vegetación arbórea': 'Bosque', 'Vegetación arbustiva': 'Arbustos', Cultivos: 'Campo sembrado', 'Suelo desnudo': 'Tierra sin plantas', 'Provincia del Chaco': 'El Chaco', 'Otras provincias': 'Otras provincias',
 };
 // Las obras usan el estilo publicado en GeoServer (geoserver/estilos/obras_rn11.sld): para la leyenda
 // simple se repiten sus reglas, con la urgencia en vez de "prioridad".

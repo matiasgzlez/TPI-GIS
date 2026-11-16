@@ -14,7 +14,11 @@ import Feature from 'ol/Feature';
 import { MultiLineString, Point } from 'ol/geom';
 import type { Coordinate } from 'ol/coordinate';
 import { Circle, Fill, RegularShape, Stroke, Style, Text } from 'ol/style';
-import { getVectorContext } from 'ol/render';
+import { getRenderPixel, getVectorContext } from 'ol/render';
+import type BaseLayer from 'ol/layer/Base';
+import type Layer from 'ol/layer/Layer';
+import type { FrameState } from 'ol/Map';
+import { apply as aplicarTransformacion } from 'ol/transform';
 import type RenderEvent from 'ol/render/Event';
 import { ponerFactorMapa, sldDeCapas, sldDeLeyenda, tamanoMapa } from './estilos';
 import { escalaActual, factorPantalla, movimientoReducido } from './preferencias';
@@ -23,6 +27,7 @@ import { claveRuta, type Ruta, type Traza } from './analisisRuta';
 import { CAPITALES, PROVINCIAS } from './provincias';
 import type Heatmap from 'ol/layer/Heatmap';
 import type LayerGroup from 'ol/layer/Group';
+import LayerGroupClase from 'ol/layer/Group';
 import { calorDe } from './calor';
 
 // Todo lo que las herramientas y los paneles necesitan del mapa.
@@ -55,6 +60,18 @@ export interface Visor {
   // Capas de puntos vistas como mapa de calor (T3): salen del WMS y se dibujan como manchas. null: el
   // calor ya está elegido y su capa (con WebGL, carga diferida) todavía está en camino.
   calor: globalThis.Map<string, LayerGroup | null>;
+  // Comparador (T6): la cortina. A la izquierda, el mapa de siempre (las capas prendidas); a la derecha,
+  // otro juego de capas, en su propia capa WMS. null: sin cortina.
+  comparacion: Comparacion | null;
+  wmsDerecha: TileLayer<TileWMS>;
+}
+
+export interface Comparacion {
+  derecha: string[];
+  // Dónde está el corte, como fracción del ancho del mapa (la cortina queda fija en la pantalla al moverse).
+  fraccion: number;
+  // Cómo se llama cada lado (para la hoja impresa).
+  titulos: [string, string];
 }
 
 // Orden de dibujo: provincias y países abajo, después polígonos, líneas, puntos y las obras arriba.
@@ -373,6 +390,57 @@ function hashCorto(texto: string) {
 
 const GRILLA_512 = createXYZ({ extent: proyeccion('EPSG:3857')!.getExtent(), tileSize: 512 });
 
+// --- Comparador (T6): el recorte de cada lado ---
+
+// Cada capa que se recorta lleva en 'lado' de qué lado de la cortina se dibuja ('izq', 'der' o nada:
+// en los dos). `corte` dice, para cada cuadro, dónde está el corte en píxeles CSS del mapa (null: sin cortina).
+// En las capas de lienzo 2D se recorta el dibujo (clip). En las de WebGL (las manchas de calor) no:
+// gl.scissor también limita el borrado del cuadro y quedaban restos del anterior. Ahí se recorta su lienzo
+// por CSS, y se anota el corte en el lienzo para la hoja impresa (que compone los lienzos a mano).
+type Lado = 'izq' | 'der';
+type Corte = (cuadro: FrameState) => number | null;
+function recortable(capa: BaseLayer, corte: Corte) {
+  if (capa.get('recortable')) return;
+  capa.set('recortable', true);
+  let recortada = false;
+  const conEventos = capa as Layer;
+  conEventos.on('prerender', (e: RenderEvent) => {
+    recortada = false;
+    const lado = capa.get('lado') as Lado | undefined;
+    const x = lado && e.frameState ? corte(e.frameState) : null;
+    const contexto = e.context;
+    if (!contexto) return;
+    if (!('save' in contexto)) {
+      const lienzo = (contexto as WebGLRenderingContext).canvas as HTMLCanvasElement;
+      lienzo.style.clipPath = x === null ? '' : lado === 'izq' ? `inset(0 calc(100% - ${x}px) 0 0)` : `inset(0 0 0 ${x}px)`;
+      if (x === null) delete lienzo.dataset.corte; else lienzo.dataset.corte = `${lado}:${x}`;
+      return;
+    }
+    if (x === null) return;
+    const [ancho, alto] = e.frameState!.size;
+    const [x1, x2] = lado === 'izq' ? [0, x] : [x, ancho];
+    const puntos = [[x1, 0], [x2, 0], [x2, alto], [x1, alto]].map(p => getRenderPixel(e, p));
+    contexto.save();
+    contexto.beginPath();
+    contexto.moveTo(puntos[0][0], puntos[0][1]);
+    puntos.slice(1).forEach(p => contexto.lineTo(p[0], p[1]));
+    contexto.closePath();
+    contexto.clip();
+    recortada = true;
+  });
+  conEventos.on('postrender', (e: RenderEvent) => {
+    if (recortada) (e.context as CanvasRenderingContext2D).restore();
+    recortada = false;
+  });
+}
+
+// En pantalla, el corte es una fracción del ancho del mapa.
+const corteEnPantalla = (visor: Visor): Corte => cuadro => (visor.comparacion ? visor.comparacion.fraccion * cuadro.size[0] : null);
+const recortarEnMapa = (visor: Visor, capa: BaseLayer) => {
+  if (capa instanceof LayerGroupClase) capa.getLayers().forEach(c => recortable(c, corteEnPantalla(visor)));
+  else recortable(capa, corteEnPantalla(visor));
+};
+
 function crearCapaWms() {
   // El SLD vive en la propia fuente: cada capa WMS (la combinada y las que tienen opacidad propia)
   // pide sus teselas con el suyo.
@@ -448,7 +516,15 @@ export function crearVisor(destino: HTMLElement): Visor {
     mapa.render();
   });
 
-  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula, rotulos, capitales, sinRotulos: new Set(), calor: new globalThis.Map() };
+  // La capa del lado derecho de la cortina (T6): apagada hasta que se compara.
+  const wmsDerecha = crearCapaWms();
+  wmsDerecha.setVisible(false);
+  wmsDerecha.setZIndex(11);
+  wmsDerecha.set('lado', 'der');
+  mapa.addLayer(wmsDerecha);
+
+  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula, rotulos, capitales, sinRotulos: new Set(), calor: new globalThis.Map(), comparacion: null, wmsDerecha };
+  [wms, wmsDerecha, rotulos, capitales].forEach(c => recortarEnMapa(visor, c));
   actualizarWms(visor);
   // Mapa de calor: cuando el mapa se queda quieto, se piden los puntos de lo que se ve.
   mapa.on('moveend', () => cargarCalor(visor));
@@ -533,6 +609,9 @@ export function cambiarCalor(visor: Visor, nombre: string, activo: boolean) {
       const capa = crearCapaCalor(nombre, calorDe(nombre).fuente, factorPantalla());
       (capa.get('mancha') as Heatmap).setOpacity(0.88 * (visor.opacidades[nombre] ?? 1));
       visor.calor.set(nombre, capa);
+      // Con la cortina, la mancha es del lado izquierdo (el mapa de siempre).
+      capa.getLayers().forEach(c => c.set('lado', visor.comparacion ? 'izq' : undefined));
+      recortarEnMapa(visor, capa);
       visor.mapa.addLayer(capa);
       visor.suscriptores.forEach(aviso => aviso());
     });
@@ -560,9 +639,8 @@ function actualizarWms(visor: Visor) {
   }
   const combinadas = nombres.filter(n => visor.opacidades[n] === undefined && !visor.calor.has(n));
   visor.wms.setVisible(combinadas.length > 0);
-  visor.rotulos.setVisible(visor.visibles.has('provincias'));
-  // Con el tablero abierto los nombres de localidades los pinta su capa: las capitales también callan.
-  visor.capitales.setVisible(visor.visibles.has('localidades') && !visor.sinRotulos.has('localidades'));
+  // Los nombres de provincia y de capitales los prende y apaga ponerLados (con el tablero abierto, los
+  // nombres de localidades los pinta su capa: las capitales también callan).
   if (combinadas.length) ponerSld(visor.wms, combinadas, visor.sinRotulos);
 
   // Las sueltas se dibujan arriba de la combinada, en su orden de dibujo entre ellas.
@@ -579,18 +657,72 @@ function actualizarWms(visor: Visor) {
     if (!capa) {
       capa = crearCapaWms();
       visor.sueltas[nombre] = capa;
+      recortarEnMapa(visor, capa);
       visor.mapa.addLayer(capa);
     }
     ponerSld(capa, [nombre], visor.sinRotulos);
     capa.setOpacity(opacidad);
     capa.setZIndex(10 + (i + 1) / (nombres.length + 1));
   });
+  ponerLados(visor);
   visor.suscriptores.forEach(aviso => aviso());
+}
+
+// Con la cortina: todo lo del mapa de siempre se dibuja a la izquierda y el otro juego a la derecha.
+// Los nombres de provincia y de capitales (que pinta el visor) siguen a su capa: si está de los dos
+// lados, van en los dos; si no, solo del lado donde está.
+function ponerLados(visor: Visor) {
+  const c = visor.comparacion;
+  const izquierda = c ? 'izq' : undefined;
+  [visor.wms, ...Object.values(visor.sueltas)].forEach(capa => capa.set('lado', izquierda));
+  for (const grupo of visor.calor.values()) grupo?.getLayers().forEach(capa => capa.set('lado', izquierda));
+  const derecha = c ? capasDerecha(visor) : [];
+  visor.wmsDerecha.setVisible(derecha.length > 0);
+  if (derecha.length) ponerSld(visor.wmsDerecha, derecha, visor.sinRotulos);
+  const seguir = (capa: VectorLayer<VectorSource>, enIzquierda: boolean, enDerecha: boolean) => {
+    capa.setVisible(enIzquierda || enDerecha);
+    capa.set('lado', !c || (enIzquierda && enDerecha) ? undefined : enIzquierda ? 'izq' : 'der');
+  };
+  seguir(visor.rotulos, visor.visibles.has('provincias'), derecha.includes('provincias'));
+  const capitales = (nombres: { has: (n: string) => boolean }) => nombres.has('localidades') && !visor.sinRotulos.has('localidades');
+  seguir(visor.capitales, capitales(visor.visibles), capitales(new Set(derecha)));
+  visor.mapa.render();
+}
+
+// Abre, cambia o cierra (null) la comparación.
+export function ponerComparacion(visor: Visor, comparacion: Comparacion | null) {
+  visor.comparacion = comparacion;
+  actualizarWms(visor);
+}
+
+// Mueve la cortina: solo se vuelve a dibujar el mapa (sin avisar a los paneles).
+export function moverCorte(visor: Visor, fraccion: number) {
+  if (!visor.comparacion) return;
+  visor.comparacion.fraccion = fraccion;
+  visor.mapa.render();
+}
+
+export const capasDerecha = (visor: Visor) => (visor.comparacion ? [...new Set(visor.comparacion.derecha)].sort((a, b) => orden(a) - orden(b)) : []);
+
+// Las capas que se ven en un píxel del mapa: con la cortina, a la derecha del corte, las del otro juego.
+// Las consultas por punto y el cartel preguntan por lo que se ve ahí.
+export function capasEn(visor: Visor, pixel: number[]): { nombres: string[]; derecha: boolean } {
+  const c = visor.comparacion;
+  if (c && pixel[0] > c.fraccion * visor.mapa.getSize()![0]) return { nombres: capasDerecha(visor), derecha: true };
+  return { nombres: capasVisibles(visor), derecha: false };
+}
+
+// La x del corte en coordenadas del mapa (EPSG:3857), o null sin cortina.
+export function corteEnCoordenada(visor: Visor) {
+  const c = visor.comparacion;
+  const tamano = visor.mapa.getSize();
+  if (!c || !tamano) return null;
+  return visor.mapa.getCoordinateFromPixel([c.fraccion * tamano[0], tamano[1] / 2])[0];
 }
 
 // Después de un WFS-T: el parámetro nuevo hace que se pidan teselas nuevas (y saltea la caché).
 export function refrescarMapa(visor: Visor) {
-  [visor.wms, ...Object.values(visor.sueltas)].forEach(c => c.getSource()!.updateParams({ _: Date.now() }));
+  [visor.wms, visor.wmsDerecha, ...Object.values(visor.sueltas)].forEach(c => c.getSource()!.updateParams({ _: Date.now() }));
 }
 
 // GetFeatureInfo con el mismo SLD que las teselas (por POST, como ellas): GeoServer evalúa las reglas
@@ -600,12 +732,13 @@ export function refrescarMapa(visor: Visor) {
 // Con la misma grilla que las teselas: getFeatureInfoUrl toma la resolución de su nivel de teselas, y tiene
 // que ser la del dibujo para que la consulta devuelva lo que se ve.
 const fuenteConsulta = new TileWMS({ url: URL_WMS, params: {}, tileGrid: GRILLA_512 });
-export async function consultarPuntoWms(visor: Visor, coordenada: Coordinate, nombres: string[], maximo = 10, señal?: AbortSignal) {
+// `derecha`: la consulta es del lado derecho de la cortina, donde no hay manchas de calor.
+export async function consultarPuntoWms(visor: Visor, coordenada: Coordinate, nombres: string[], maximo = 10, señal?: AbortSignal, derecha = false) {
   const capas = nombres.join(',');
   const url = fuenteConsulta.getFeatureInfoUrl(coordenada, visor.mapa.getView().getResolution()!, 'EPSG:3857', {
     LAYERS: capas, QUERY_LAYERS: capas, INFO_FORMAT: 'application/json', FEATURE_COUNT: maximo,
   })!;
-  const respuesta = await fetch(url, { method: 'POST', body: new URLSearchParams({ SLD_BODY: sldDeCapas(nombres, visor.sinRotulos, new Set(visor.calor.keys())) }), signal: señal });
+  const respuesta = await fetch(url, { method: 'POST', body: new URLSearchParams({ SLD_BODY: sldDeCapas(nombres, visor.sinRotulos, derecha ? new Set() : new Set(visor.calor.keys())) }), signal: señal });
   const texto = await respuesta.text();
   if (!respuesta.ok || texto.startsWith('<')) throw new Error('GeoServer no pudo responder la consulta.');
   return JSON.parse(texto) as { features: { id: string; properties: Record<string, unknown> }[] };
@@ -644,9 +777,12 @@ export function aplicarTema(visor: Visor) {
 // `ppp`: puntos por pulgada de la imagen (para el PDF, el doble de los 96 de pantalla).
 export async function cargarLeyenda(nombre: string, señal: AbortSignal, simple = false, ppp?: number): Promise<string> {
   const opciones = ['fontName:Helvetica', 'fontAntiAliasing:true', 'fontSize:12', 'dx:8', 'forceLabels:on', 'fontColor:0x2A2E33', ...(ppp ? [`dpi:${ppp}`] : [])].join(';');
-  const url = `${URL_WMS}?service=WMS&request=GetLegendGraphic&format=image/png&transparent=true`
+  let url = `${URL_WMS}?service=WMS&request=GetLegendGraphic&format=image/png&transparent=true`
     + `&width=18&height=18&layer=${nombre}&legend_options=${opciones}`;
   const sld = sldDeLeyenda(nombre, simple);
+  // nginx guarda las leyendas por URL y el estilo va en el cuerpo: sin su hash en la URL, una leyenda de un
+  // modo (o de un estilo viejo) se servía para el otro.
+  if (sld) url += `&ESTILO=${hashCorto(sld)}`;
   // Para el PDF (`ppp`) se pide siempre por fetch, también sin SLD, para comprobar que llegó entera.
   if (!sld && !ppp) return url;
   const respuesta = sld
@@ -830,10 +966,20 @@ function capaWmsImpresion(nombres: string[], sinRotulos: ReadonlySet<string>, op
 // `extension`: el marco de la hoja. Los mapas de calor piden sus puntos para ese encuadre (con su propio
 // control: no le cambian los datos al mapa); si no se pueden traer todos, es error (la hoja no sale con
 // una mancha incompleta).
+// Con la cortina (T6), la hoja la muestra en el mismo lugar del mapa (la misma coordenada): cada capa
+// lleva su lado y el recorte se calcula con la transformación de la hoja.
 export async function capasParaImprimir(visor: Visor, extension: number[]) {
   const nombres = capasVisibles(visor);
   const combinadas = nombres.filter(n => visor.opacidades[n] === undefined && !visor.calor.has(n));
   const capas: (TileLayer<TileWMS> | VectorLayer<VectorSource> | LayerGroup)[] = [];
+  const corteX = corteEnCoordenada(visor);
+  const corte: Corte = cuadro => (corteX === null ? null : aplicarTransformacion(cuadro.coordinateToPixelTransform, [corteX, 0])[0]);
+  const conLado = <T extends BaseLayer>(capa: T, lado: Lado | undefined) => {
+    if (corteX === null) return capa;
+    const hojas = capa instanceof LayerGroupClase ? capa.getLayers().getArray() : [capa];
+    hojas.forEach(h => { h.set('lado', lado); recortable(h, corte); });
+    return capa;
+  };
   if (visor.calor.size) {
     const { crearCapaCalor } = await import('./capaCalor');
     for (const nombre of visor.calor.keys()) {
@@ -842,22 +988,28 @@ export async function capasParaImprimir(visor: Visor, extension: number[]) {
       if (estado.fase !== 'lista') throw new Error(`calor:${nombre}:${estado.fase}`);
       const grupo = crearCapaCalor(nombre, control.fuente, 1, true);
       (grupo.get('mancha') as Heatmap).setOpacity(0.88 * (visor.opacidades[nombre] ?? 1));
-      capas.push(grupo);
+      capas.push(conLado(grupo, 'izq'));
     }
   }
-  if (combinadas.length) capas.push(capaWmsImpresion(combinadas, visor.sinRotulos));
+  if (combinadas.length) capas.push(conLado(capaWmsImpresion(combinadas, visor.sinRotulos), 'izq'));
+  const derecha = capasDerecha(visor);
+  if (corteX !== null && derecha.length) {
+    const capa = capaWmsImpresion(derecha, visor.sinRotulos);
+    capa.setZIndex(11);
+    capas.push(conLado(capa, 'der'));
+  }
   nombres.forEach((nombre, i) => {
     const opacidad = visor.opacidades[nombre];
     if (opacidad === undefined || visor.calor.has(nombre)) return;
     const capa = capaWmsImpresion([nombre], visor.sinRotulos, opacidad);
     capa.setZIndex(10 + (i + 1) / (nombres.length + 1));
-    capas.push(capa);
+    capas.push(conLado(capa, 'izq'));
   });
   for (const capa of visor.mapa.getLayers().getArray()) {
     if (!(capa instanceof VectorLayer) || capa instanceof Graticule || !capa.getVisible()) continue;
     const estilo = capa.getStyleFunction();
     if (!estilo) continue;
-    capas.push(new VectorLayer({
+    capas.push(conLado(new VectorLayer({
       source: capa.getSource()!,
       style: (feature, resolucion) => paraImprimir(() => estilo(feature, resolucion)),
       declutter: capa.getDeclutter(),
@@ -865,9 +1017,17 @@ export async function capasParaImprimir(visor: Visor, extension: number[]) {
       minResolution: capa.getMinResolution(),
       maxResolution: capa.getMaxResolution(),
       opacity: capa.getOpacity(),
-    }));
+    }), capa.get('lado')));
   }
   return capas;
+}
+
+// El rectángulo libre del mapa en píxeles de pantalla: [izquierda, arriba, derecha, abajo] (la cortina se
+// mueve ahí adentro, nunca debajo de un panel).
+export function areaLibre(visor: Visor, conPanel: boolean) {
+  const [ancho, alto] = visor.mapa.getSize() ?? [window.innerWidth, window.innerHeight];
+  const [arriba, derecha, abajo, izquierda] = margenesMapa(conPanel);
+  return [izquierda, arriba, ancho - derecha, alto - abajo];
 }
 
 // Lo que se ve del mapa, sin lo que tapan los paneles que están a la vista (`conPanel`: si hay un

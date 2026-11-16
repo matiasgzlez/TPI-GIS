@@ -5,7 +5,7 @@ import type { Pixel } from 'ol/pixel';
 import { tituloDeCapa } from './config';
 import { capaSimple } from './interfaz';
 import { nombrePro, nombreSimple } from './entidades';
-import { capasVisibles, consultarPuntoWms, type Visor } from './visor';
+import { capasEn, consultarPuntoWms, type Visor } from './visor';
 
 // Las capas que cubren todo (provincias, países) no se nombran al pasar: dirían "Chaco" en todos lados.
 const DE_FONDO = new Set(['provincias', 'pais_lim']);
@@ -57,13 +57,15 @@ export function activarCartel(visor: Visor, { habilitado, alCambiarRuta, simple 
   };
 
   async function consultar(coordenada: Coordinate, pixel: Pixel) {
-    const capas = [...capasVisibles(visor)].reverse().filter(c => !DE_FONDO.has(c));
+    // Con la cortina (T6), lo que se ve de ese lado.
+    const lado = capasEn(visor, pixel);
+    const capas = [...lado.nombres].reverse().filter(c => !DE_FONDO.has(c));
     if (!capas.length) return;
     pedido?.abort();
     pedido = new AbortController();
     const movimiento = movimientos;
     try {
-      const datos = await consultarPuntoWms(visor, coordenada, capas, 1, pedido.signal);
+      const datos = await consultarPuntoWms(visor, coordenada, capas, 1, pedido.signal, lado.derecha);
       if (movimiento !== movimientos || visor.mapa.getView().getAnimating()) return;
       const entidad = datos.features?.[0];
       if (!entidad) return ocultar();

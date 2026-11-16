@@ -7,7 +7,7 @@ import { buffer } from 'ol/extent';
 import { motion, useIsPresent } from 'motion/react';
 import { Switch } from '@heroui/react';
 import { ArrowDown, Eye, FilePdf, MapTrifold, MagnifyingGlassMinus, MagnifyingGlassPlus, Printer, X } from '@phosphor-icons/react';
-import { capasVisibles, cargarLeyenda, type Visor } from '../visor';
+import { capasDerecha, capasVisibles, cargarLeyenda, type Visor } from '../visor';
 import { EXTENSION_CHACO, URL_WFS, WORKSPACE, tituloDeCapa } from '../config';
 import { capaSimple, useInterfaz } from '../interfaz';
 import { RESORTE_PANEL } from '../movimiento';
@@ -225,9 +225,22 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
   const claveLeyendas = `${simple}|${reintento}`;
   useEffect(() => {
     let vigente = true;
-    const nombres = [...capasVisibles(visor)].reverse();
+    // Con la cortina (T6), también las del lado derecho. Primero las de un solo lado (lo que se compara), con
+    // el lado en el título («‹ » a la izquierda, « ›» a la derecha, como los rótulos de la cortina en el mapa:
+    // la letra del PDF no tiene flechas), y al final las de los dos (el fondo común): si no entran todas, falta el fondo.
+    const izquierda = [...capasVisibles(visor)].reverse();
+    const derecha = visor.comparacion ? [...capasDerecha(visor)].reverse() : [];
+    const lado = new Map<string, string>();
+    if (visor.comparacion) {
+      izquierda.filter(n => !derecha.includes(n)).forEach(n => lado.set(n, 'izq'));
+      derecha.filter(n => !izquierda.includes(n)).forEach(n => lado.set(n, 'der'));
+    }
+    const nombres = visor.comparacion
+      ? [...izquierda.filter(n => lado.has(n)), ...derecha.filter(n => lado.has(n)), ...izquierda.filter(n => !lado.has(n))]
+      : izquierda;
     // Las obras sin ninguna cargada no van a la leyenda (explicaría algo que no está en el mapa).
-    hayObras().then(hay => Promise.all(nombres.filter(n => n !== 'obras_rn11' || hay).map(n => (visor.calor.has(n) ? Promise.resolve(leyendaCalor(n, simple)) : leyendaDe(n, simple))))).then(ls => {
+    hayObras().then(hay => Promise.all(nombres.filter(n => n !== 'obras_rn11' || hay).map(n => (visor.calor.has(n) ? Promise.resolve(leyendaCalor(n, simple)) : leyendaDe(n, simple))
+      .then(l => (l && lado.has(n) ? { ...l, lado: lado.get(n) as 'izq' | 'der' } : l))))).then(ls => {
       if (!vigente) return;
       setLeyendas({ clave: claveLeyendas, lista: ls.filter((l): l is Leyenda => !!l) });
       // Una leyenda que no llegó es un error: la hoja saldría incompleta.

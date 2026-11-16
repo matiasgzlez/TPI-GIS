@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Toast, toast } from '@heroui/react';
-import { CornersOut, FilePdf, GearSix, ListBullets, Minus, Moon, Plus, Question, Stack, Sun, Table as IconoTabla, X } from '@phosphor-icons/react';
+import { CornersOut, FilePdf, GearSix, ListBullets, Minus, Moon, Plus, Question, SplitHorizontal, Stack, Sun, Table as IconoTabla, X } from '@phosphor-icons/react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
@@ -47,6 +47,8 @@ const Guia = lazy(() => import('./componentes/simple/Guia'));
 // Imprimir / exportar a PDF: jsPDF, pdf.js y la letra incrustada se cargan solo al abrirlo.
 const Imprimir = lazy(() => import('./exportar/Imprimir'));
 const TablaDatos = lazy(() => import('./componentes/pro/TablaDatos'));
+// Comparador deslizante (T6): la cortina y sus listas, recién al abrirlo.
+const Comparador = lazy(() => import('./componentes/Comparador'));
 
 const retraso = (ms: number) => ({ '--retraso': `${ms}ms` }) as React.CSSProperties;
 // Si la pantalla cumple una media query, atento a los cambios de tamaño.
@@ -95,6 +97,8 @@ export default function App() {
   const [altoTabla, setAltoTabla] = useState(0);
   const ultimaTabla = useRef<string | null>(null);
   const [recargaObras, setRecargaObras] = useState(0);
+  // Comparador (T6): la cortina que divide el mapa en dos juegos de capas.
+  const [comparar, setComparar] = useState(false);
   const modal = !preferencias.interfaz || guia || exportar;
   // Pro por debajo de 1440 px (la notebook de 1366): sin nada que mostrar, el inspector se pliega a un botón y le deja el lugar al mapa.
   const anchoAmplio = useMedia('(min-width: 1440px)');
@@ -102,7 +106,12 @@ export default function App() {
   const inspectorPlegado = interfaz === 'pro' && !anchoAmplio && !hayContenido && pestana === 'informacion';
 
   // El encuadre del mapa deja libres los bordes que tapa la interfaz a la vista.
-  useEffect(() => ponerDisposicion(interfaz, plegado, inspectorPlegado, tabla ? altoTabla : 0), [interfaz, plegado, inspectorPlegado, tabla, altoTabla]);
+  // El alto de la tabla vale hasta que terminó de salir (lo pone en 0 su ref al desmontarse, después de la
+  // animación): si no, el lugar libre crecía de golpe y la cortina se acomodaba encima de la tabla que se iba.
+  // Durante el render (es un valor de módulo, idempotente): así los hijos —la cortina del comparador— ya lo
+  // ven en sus efectos de layout del mismo cuadro (con un efecto de App, que corre después de los de los
+  // hijos, la cortina medía un cuadro tarde).
+  ponerDisposicion(interfaz, plegado, inspectorPlegado, altoTabla);
   // La hoja impresa sale con las franjas enteras: al abrir Imprimir se corta la animación de distancia (T5).
   useEffect(() => { if (exportar && visor) terminarAnimacion(visor); }, [exportar, visor]);
   // La tabla es del profesional: al pasar al simple se cierra.
@@ -228,6 +237,9 @@ export default function App() {
       if (modal || configuracion || hayDialogoModal()) return;
       const escribiendo = escribiendoEn(e.target);
       if (e.key === 'Escape' && !escribiendo) {
+        // Con la cortina del comparador abierta, Esc cierra primero lo de adelante (la herramienta, los
+        // resultados) y, cuando no queda nada, la cortina.
+        if (comparar && modo === 'navegar' && !resultados && !obra && !exportar && !temasAbierto) { setComparar(false); return; }
         setTemasAbierto(false);
         setExportar(false);
         setModo('navegar');
@@ -239,6 +251,8 @@ export default function App() {
       if (e.key.toLowerCase() === 'p') { e.preventDefault(); setExportar(true); return; } // sin escribir la «p» en el título
       // "T": la tabla de datos (profesional), de la última capa abierta o de la de más arriba.
       if (e.key.toLowerCase() === 't' && interfaz === 'pro' && !celular && visor) { e.preventDefault(); alternarTabla(); return; }
+      // "C": el comparador (los dos modos).
+      if (e.key.toLowerCase() === 'c' && !celular && visor) { e.preventDefault(); alternarComparar(); return; }
       const elegido = (Object.keys(HERRAMIENTAS) as Modo[]).find(m => HERRAMIENTAS[m].tecla === e.key);
       if (elegido) setModo(elegido);
     };
@@ -262,6 +276,11 @@ export default function App() {
     // La última que se abrió; si no, Localidades (si está prendida) o la primera con datos de verdad: las
     // obras arrancan vacías y la primera impresión era una tabla vacía.
     abrirTabla(ultimaTabla.current ?? (capas.includes('localidades') ? 'localidades' : capas.find(c => c !== 'provincias' && c !== 'obras_rn11') ?? 'localidades'));
+  }
+
+  // Abre o cierra el comparador (el foco vuelve solo a quien lo abrió).
+  function alternarComparar() {
+    setComparar(c => !c);
   }
 
   function cerrarResultados() {
@@ -548,6 +567,16 @@ export default function App() {
               <AvisoCalor visor={visor} onAcercar={() => zoom(1)} />
             </div>
           )}
+          {comparar && !celular && (
+            <Suspense fallback={null}>
+              <Comparador
+                visor={visor}
+                conPanel={hayContenido}
+                disposicion={`${interfaz}|${plegado}|${inspectorPlegado}|${altoTabla}|${hayContenido}`}
+                onCerrar={() => setComparar(false)}
+              />
+            </Suspense>
+          )}
           {interfaz === 'simple' ? (
             <>
               {/* Simple: buscador grande arriba, "¿Qué querés ver?" a la izquierda, botones grandes abajo. */}
@@ -585,11 +614,11 @@ export default function App() {
 
               <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center max-lg:bottom-3 lg:left-[360px] lg:right-[96px] xl:left-[404px] 2xl:left-0 2xl:right-0">
                 <div className="entra pointer-events-auto" style={retraso(260)}>
-                  <Acciones modo={modo} onModo={setModo} sinPista={!!obra || exportar} imprimiendo={exportar} onImprimir={() => setExportar(e => !e)} />
+                  <Acciones modo={modo} onModo={setModo} sinPista={!!obra || exportar} imprimiendo={exportar} onImprimir={() => setExportar(e => !e)} comparando={comparar} onComparar={alternarComparar} />
                 </div>
               </div>
               {!celular && (
-                <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex items-end gap-3">
+                <div className="controles-mapa pointer-events-none absolute bottom-4 right-4 z-10 flex items-end gap-3">
                   {preferencias.minimapa && <div className="entra pointer-events-auto max-xl:hidden" style={retraso(440)}><Minimapa visor={visor} /></div>}
                   <div className="entra" style={retraso(380)}>{zoomBotones(true)}</div>
                 </div>
@@ -642,6 +671,7 @@ export default function App() {
                 <div className="entra pointer-events-auto flex items-center gap-2" style={retraso(260)}>
                   <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} angosto />
                   <BotonRedondo etiqueta={tabla ? 'Cerrar la tabla de datos (T)' : 'Tabla de datos (T)'} onPress={alternarTabla} compacto activo={!!tabla}><IconoTabla size={21} weight="bold" /></BotonRedondo>
+                  <BotonRedondo etiqueta="Comparar dos juegos de capas (C)" onPress={alternarComparar} compacto activo={comparar}><SplitHorizontal size={21} weight="bold" /></BotonRedondo>
                   <BotonRedondo etiqueta="Exportar a PDF" onPress={() => setExportar(e => !e)} compacto><FilePdf size={21} weight="bold" /></BotonRedondo>
                   {interruptor}
                   {botonesTema(true)}
@@ -733,7 +763,9 @@ export default function App() {
                     exit={{ opacity: 0, y: 28 }}
                     transition={RESORTE_PANEL}
                     className="pointer-events-auto absolute bottom-[68px] z-10 flex flex-col"
-                    style={{ left: plegado ? 80 : 340, right: inspectorPlegado ? 12 : 416, height: tabla.amplia ? 'calc((100% - 164px) * 0.68)' : 'max(calc((100% - 164px) * 0.42), min(320px, calc(100% - 300px)))', transition: 'height .45s var(--ios), left .3s, right .3s' }}
+                    style={{ left: plegado ? 80 : 340, right: inspectorPlegado ? 12 : 416, // Con la animación de distancia abierta, la tabla no sube más allá de su panel y deja 200 px de mapa
+                      // (para el zoom y el comparador): --fondo-franja lo pone el panel (CrecerFranja).
+                      height: `min(${tabla.amplia ? 'calc((100% - 164px) * 0.68)' : 'max(calc((100% - 164px) * 0.42), min(320px, calc(100% - 300px)))'}, calc(100% - 268px - var(--fondo-franja, 0px) - var(--reserva-comparador, 0px)))`, transition: 'height .45s var(--ios), left .3s, right .3s' }}
                   >
                     <Suspense fallback={<div className="panel h-full" />}>
                       <TablaDatos
@@ -753,7 +785,7 @@ export default function App() {
                 )}
               </AnimatePresence>
 
-              <div className={`pointer-events-none absolute z-10 flex items-end gap-3 transition-[bottom] duration-300 ${inspectorPlegado ? 'right-3' : 'right-[408px]'}`} style={{ bottom: 68 + (tabla ? altoTabla + 12 : 0) }}>
+              <div className={`controles-mapa pointer-events-none absolute z-10 flex items-end gap-3 transition-[bottom] duration-300 ${inspectorPlegado ? 'right-3' : 'right-[408px]'}`} style={{ bottom: 68 + (altoTabla ? altoTabla + 12 : 0) }}>
                 <div className="entra" style={retraso(420)}>{zoomBotones()}</div>
                 {preferencias.minimapa && <div className="entra pointer-events-auto" style={retraso(480)}><Minimapa visor={visor} /></div>}
               </div>

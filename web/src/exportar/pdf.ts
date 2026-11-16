@@ -19,7 +19,8 @@ export type Contenido =
   | { tipo: 'medicion'; titulo: string; medicion: Medicion }
   | { tipo: 'tablero'; titulo: string; analisis: AnalisisRuta };
 
-export interface Leyenda { titulo: string; imagen: string; ancho: number; alto: number }
+// `lado`: con la cortina del comparador (T6), de qué lado es la capa (se marca «‹ » o « ›» sin que el recorte la corte).
+export interface Leyenda { titulo: string; imagen: string; ancho: number; alto: number; lado?: 'izq' | 'der' }
 
 export interface OpcionesPdf {
   titulo: string;
@@ -242,7 +243,8 @@ function dibujarLeyenda(doc: jsPDF, leyendas: Leyenda[], caja: { x: number; y: n
   letra('bold', 10);
   doc.text(titulo, caja.x, caja.y + 3.5);
   const sep = 3;
-  const anchoCol = (caja.ancho - sep * (caja.columnas - 1)) / caja.columnas;
+  let columnas = caja.columnas;
+  let anchoCol = (caja.ancho - sep * (columnas - 1)) / columnas;
   const arriba = caja.y + 8.5;
   const fondo = caja.y + caja.alto;
   const TITULO = 4.2; const ESPACIO = 2;
@@ -256,7 +258,7 @@ function dibujarLeyenda(doc: jsPDF, leyendas: Leyenda[], caja: { x: number; y: n
       let ancho = l.ancho * k; let alto = l.alto * k;
       if (ancho > anchoCol) { alto *= anchoCol / ancho; ancho = anchoCol; }
       if (y + TITULO + alto > fondo) {
-        if (col + 1 >= caja.columnas) break;
+        if (col + 1 >= columnas) break;
         col++; y = arriba;
         if (y + TITULO + alto > fondo) break;
       }
@@ -268,13 +270,23 @@ function dibujarLeyenda(doc: jsPDF, leyendas: Leyenda[], caja: { x: number; y: n
   // La escala más grande en la que entran todas, sin bajar de 0,065 (letra de ~4,5 pt).
   let lugares = ubicar(0.1);
   for (let k = 0.095; lugares.length < leyendas.length && k >= 0.065 - 1e-9; k -= 0.005) lugares = ubicar(k);
+  // En una columna (la hoja horizontal) y sin lugar para todas (por ejemplo, los dos lados del comparador):
+  // en dos columnas, que las leyendas son angostas.
+  if (lugares.length < leyendas.length && columnas === 1) {
+    columnas = 2;
+    anchoCol = (caja.ancho - sep) / 2;
+    for (let k = 0.1; k >= 0.065 - 1e-9; k -= 0.005) { const prueba = ubicar(k); if (prueba.length >= lugares.length) lugares = prueba; if (prueba.length === leyendas.length) break; }
+  }
   // Si ni así entran, se deja lugar para el aviso.
   const faltan = leyendas.length - lugares.length;
   if (faltan) { const quitar = lugares.filter(l => l.y + TITULO + l.alto > fondo - 5).length; lugares = lugares.slice(0, lugares.length - quitar); }
 
   lugares.forEach((lugar, i) => {
     letra('bold', 7.5, TINTA);
-    doc.text(recortar(doc, leyendas[i].titulo, anchoCol), lugar.x, lugar.y + 2.6);
+    const { titulo: nombre, lado } = leyendas[i];
+    const marca = lado === 'izq' ? '‹ ' : lado === 'der' ? ' ›' : '';
+    const corto = recortar(doc, nombre, anchoCol - (marca ? doc.getTextWidth(marca) : 0));
+    doc.text(lado === 'izq' ? `${marca}${corto}` : `${corto}${marca}`, lugar.x, lugar.y + 2.6);
     doc.addImage(leyendas[i].imagen, 'PNG', lugar.x, lugar.y + TITULO - 0.3, lugar.ancho, lugar.alto, `leyenda-${i}`, 'FAST');
   });
   const restantes = leyendas.length - lugares.length;

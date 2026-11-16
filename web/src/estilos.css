@@ -304,3 +304,21 @@ input, textarea { caret-color: var(--vial); }
 .latido { animation: latir 3.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .latido, .esqueleto { animation: none !important; } }
 [data-movimiento="reducido"] .latido, [data-movimiento="reducido"] .esqueleto { animation: none !important; }
+
+/* --- Comparador (T6) --- */
+/* La línea del corte: clara con un halo oscuro, se lee sobre cualquier capa en los dos temas. */
+.comparador-linea { width: 2px; background: var(--superficie); box-shadow: 0 0 0 1px rgba(21, 23, 26, 0.45), 0 0 0 3px rgba(21, 23, 26, 0.08), 0 0 18px rgba(21, 23, 26, 0.35); }
+.comparador-manija {
+  background: var(--superficie);
+  box-shadow: 0 0 0 1px rgba(21, 23, 26, 0.12), 0 6px 18px -4px rgba(21, 23, 26, 0.4);
+  transition: scale 0.25s var(--ios), box-shadow 0.25s var(--ios);
+}
+.comparador-manija:hover, .comparador[data-arrastrando] .comparador-manija { scale: 1.08; }
+.comparador[data-arrastrando] .comparador-manija { box-shadow: 0 0 0 2px var(--tinta), 0 10px 26px -6px rgba(21, 23, 26, 0.5); }
+/* En oscuro, la superficie es oscura: la línea va en la tinta (clara) y la manija con un borde claro. */
+.dark .comparador-linea { background: var(--tinta); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 16px rgba(0, 0, 0, 0.6); }
+.dark .comparador-manija { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.4), 0 6px 18px -4px rgba(0, 0, 0, 0.7); }
+/* Con una lista del comparador abierta sin lugar (animación de distancia y tabla en una notebook), los controles
+   del mapa y la manija de la cortina se ocultan mientras está abierta. */
+.interfaz[data-lista-sin-lugar] .controles-mapa,
+.interfaz[data-lista-sin-lugar] .comparador-manija { visibility: hidden; }

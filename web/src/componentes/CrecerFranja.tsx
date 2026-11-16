@@ -77,6 +77,8 @@ export default function CrecerFranja({ visor, analisis, onCerrar }: { visor: Vis
       if (e.key !== 'Escape' || hayDialogoModal() || (escribiendoEn(e.target) && !panel.current?.contains(e.target as Node))) return;
       // Con las Referencias abiertas (modo simple), el Esc es de ellas: se cierra primero lo de adelante.
       if (document.querySelector('button[title^="Referencias"][aria-expanded="true"]')) return;
+      // Lo mismo con el comparador (T6): su lista abierta o el foco en la cortina.
+      if (document.querySelector('.comparador [role=dialog]:not([inert])') || document.activeElement?.closest('.comparador')) return;
       e.stopImmediatePropagation();
       cerrar.current();
     };
@@ -88,6 +90,19 @@ export default function CrecerFranja({ visor, analisis, onCerrar }: { visor: Vis
       if (enPanel && origen?.isConnected) requestAnimationFrame(() => origen.focus({ preventScroll: true }));
     };
   }, [visor]);
+
+  // Dónde termina el panel (en unidades de .interfaz), como variable CSS: la tabla de datos del profesional no
+  // sube más allá (agrandada lo tapaba, y con él el zoom y la cortina del comparador).
+  useEffect(() => {
+    const interfazEl = document.querySelector<HTMLElement>('.interfaz');
+    const el = panel.current;
+    if (!interfazEl || !el) return;
+    const poner = () => interfazEl.style.setProperty('--fondo-franja', `${(el.parentElement?.offsetTop ?? 0) + el.offsetTop + el.offsetHeight}px`);
+    const o = new ResizeObserver(poner);
+    o.observe(el);
+    poner();
+    return () => { o.disconnect(); interfazEl.style.removeProperty('--fondo-franja'); };
+  }, []);
 
   // El mapa sigue a la distancia.
   useEffect(() => ponerRadioAnimado(visor, metros), [visor, metros]);

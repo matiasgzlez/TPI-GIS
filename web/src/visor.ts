@@ -13,7 +13,7 @@ import { getCenter } from 'ol/extent';
 import Feature from 'ol/Feature';
 import { MultiLineString, Point } from 'ol/geom';
 import type { Coordinate } from 'ol/coordinate';
-import { Circle, Fill, RegularShape, Stroke, Style, Text } from 'ol/style';
+import { Circle, Fill, Icon, RegularShape, Stroke, Style, Text } from 'ol/style';
 import { getRenderPixel, getVectorContext } from 'ol/render';
 import type BaseLayer from 'ol/layer/Base';
 import type Layer from 'ol/layer/Layer';
@@ -55,6 +55,7 @@ export interface Visor {
   rotulos: VectorLayer<VectorSource>;
   // Nombres de las capitales, también en el cliente (en el borde entre teselas GeoServer los descartaba).
   capitales: VectorLayer<VectorSource>;
+  lucesCapitales: VectorLayer<VectorSource>;
   // Capas cuyos rótulos del WMS se callan (con el tablero abierto, localidades: los pinta el visor).
   sinRotulos: Set<string>;
   // Capas de puntos vistas como mapa de calor (T3): salen del WMS y se dibujan como manchas. null: el
@@ -305,6 +306,8 @@ function crearRotulos() {
 // de las demás capitales.
 // Estrella como la del WMS (#B71C1C, borde blanco) para las capitales que el IGN no marca como tales.
 const ESTRELLA = new RegularShape({ points: 5, radius: 6.5, radius2: 2.8, fill: new Fill({ color: '#B71C1C' }), stroke: new Stroke({ color: '#ffffff', width: 0.8 }), declutterMode: 'none' });
+// 1:6.000.000 con el denominador de GeoServer (6.000.000 × 0,00028).
+const RESOLUCION_CAPITALES = 1680;
 
 function estiloCapital(feature: import('ol/Feature').FeatureLike) {
   const chaco = feature.get('provincia') === 'Chaco';
@@ -326,8 +329,32 @@ function crearCapitales() {
   const fuente = new VectorSource({
     features: CAPITALES.map(c => new Feature({ geometry: new Point(fromLonLat(c.punto)), nombre: c.nombre, provincia: c.provincia, estrella: !!c.estrella })),
   });
-  // Hasta 1:6.000.000 con el denominador de GeoServer: 6.000.000 × 0,00028 = 1680 m por píxel.
-  return new VectorLayer({ source: fuente, style: estiloCapital, declutter: true, maxResolution: 1680, zIndex: 31 });
+  return new VectorLayer({ source: fuente, style: estiloCapital, declutter: true, maxResolution: RESOLUCION_CAPITALES, zIndex: 31 });
+}
+
+function crearLucesCapitales(fuente: VectorSource) {
+  // Una textura reutilizada por todas las capitales. El halo va debajo de los rótulos.
+  const lienzo = document.createElement('canvas');
+  lienzo.width = lienzo.height = 96;
+  const ctx = lienzo.getContext('2d')!;
+  const luz = ctx.createRadialGradient(48, 48, 0, 48, 48, 48);
+  luz.addColorStop(0, '#fff5cb');
+  luz.addColorStop(0.12, '#ffe4a2');
+  luz.addColorStop(0.29, 'rgba(255, 174, 66, 0.7)');
+  luz.addColorStop(0.56, 'rgba(248, 132, 47, 0.23)');
+  luz.addColorStop(1, 'rgba(248, 132, 47, 0)');
+  ctx.fillStyle = luz;
+  ctx.fillRect(0, 0, 96, 96);
+
+  const normal = new Style({ image: new Icon({ img: lienzo, scale: 36 / 96 }) });
+  const chaco = new Style({ image: new Icon({ img: lienzo, scale: 48 / 96 }) });
+  return new VectorLayer({
+    source: fuente,
+    className: 'luces-capitales',
+    style: feature => feature.get('provincia') === 'Chaco' ? chaco : normal,
+    maxResolution: RESOLUCION_CAPITALES,
+    zIndex: 29,
+  });
 }
 
 function crearCuadricula() {
@@ -485,12 +512,14 @@ export function crearVisor(destino: HTMLElement): Visor {
   const capaNombres = new VectorLayer({ source: analisis, style: estiloNombres, zIndex: 40, declutter: true });
   const rotulos = crearRotulos();
   const capitales = crearCapitales();
+  const lucesCapitales = crearLucesCapitales(capitales.getSource()!);
 
   const mapa = new Map({
     target: destino,
     layers: [
       cuadricula,
       wms,
+      lucesCapitales,
       capitales,
       rotulos,
       capaAnalisis,
@@ -523,8 +552,8 @@ export function crearVisor(destino: HTMLElement): Visor {
   wmsDerecha.set('lado', 'der');
   mapa.addLayer(wmsDerecha);
 
-  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula, rotulos, capitales, sinRotulos: new Set(), calor: new globalThis.Map(), comparacion: null, wmsDerecha };
-  [wms, wmsDerecha, rotulos, capitales].forEach(c => recortarEnMapa(visor, c));
+  const visor: Visor = { mapa, wms, visibles: new Set(CAPAS_INICIALES), opacidades: {}, sueltas: {}, suscriptores: new Set(), resaltado, foco, dibujo, ruta, analisis, cuadricula, rotulos, capitales, lucesCapitales, sinRotulos: new Set(), calor: new globalThis.Map(), comparacion: null, wmsDerecha };
+  [wms, wmsDerecha, rotulos, capitales, lucesCapitales].forEach(c => recortarEnMapa(visor, c));
   actualizarWms(visor);
   // Mapa de calor: cuando el mapa se queda quieto, se piden los puntos de lo que se ve.
   mapa.on('moveend', () => cargarCalor(visor));
@@ -685,7 +714,10 @@ function ponerLados(visor: Visor) {
   };
   seguir(visor.rotulos, visor.visibles.has('provincias'), derecha.includes('provincias'));
   const capitales = (nombres: { has: (n: string) => boolean }) => nombres.has('localidades') && !visor.sinRotulos.has('localidades');
-  seguir(visor.capitales, capitales(visor.visibles), capitales(new Set(derecha)));
+  const capitalesIzquierda = capitales(visor.visibles);
+  const capitalesDerecha = capitales(new Set(derecha));
+  seguir(visor.capitales, capitalesIzquierda, capitalesDerecha);
+  seguir(visor.lucesCapitales, capitalesIzquierda, capitalesDerecha);
   visor.mapa.render();
 }
 
@@ -887,7 +919,7 @@ function margenesMapa(conPanel = false): Margenes {
   const { base, conPanel: derecha } = DISPOSICIONES[disposicion];
   const margenDerecho = disposicion === 'pro' && inspectorPlegado ? 40 : base[1];
   const abajo = disposicion === 'pro' && altoTablaAbierta ? base[2] + altoTablaAbierta : base[2];
-  const margenes: Margenes = [base[0], conPanel ? Math.max(margenDerecho, derecha) : margenDerecho, abajo, disposicion === 'pro' && lateralPlegado ? 96 : base[3]];
+  const margenes: Margenes = [base[0], conPanel ? Math.max(margenDerecho, derecha) : margenDerecho, abajo, lateralPlegado ? 16 : base[3]];
   return margenes.map(m => Math.round(m * escala)) as Margenes;
 }
 

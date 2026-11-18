@@ -6,7 +6,7 @@ import { RESORTE_PANEL } from '../../movimiento';
 // y se repite desde el botón de ayuda. Cada paso apunta a un elemento con data-guia="…".
 const PASOS = [
   { destino: 'buscar', titulo: 'Buscá lo que quieras', texto: 'Escribí un pueblo, "escuelas" o una pregunta como "¿cuánta gente vive cerca de la ruta 11?".' },
-  { destino: 'temas', titulo: 'Elegí qué ver', texto: 'Tocá un tema, como Agua o Escuelas, y después lo que quieras mostrar en el mapa.' },
+  { destino: 'temas', titulo: 'Elegí qué ver', texto: 'Abrí «¿Qué querés ver?» y elegí un tema, como Agua o Escuelas.' },
   { destino: 'acciones', titulo: 'Tocá un botón', texto: 'Para saber qué hay en un lugar, medir o agregar una obra en la ruta.' },
 ] as const;
 

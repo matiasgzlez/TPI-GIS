@@ -142,13 +142,17 @@ export function consignas(combo, entorno) {
     const capas = () => p.evaluate(() => window.__visor().visibles.size);
     const n0 = await capas();
     if (modo === 'simple') {
+      await p.getByRole('button', { name: '¿Qué querés ver?', exact: true }).click();
       await p.getByRole('button', { name: /^Escuelas, salud/ }).first().click();
-      const tarjeta = p.locator('[data-guia=temas] button[aria-pressed]').first();
+      const tarjeta = p.locator('#temas-simple button[aria-pressed]').first();
       await tarjeta.waitFor(); await tarjeta.click();
-    } else await p.getByLabel('Prender todo Relieve').click({ force: true });
+    } else {
+      await p.getByRole('button', { name: 'Capas', exact: true }).click();
+      await p.getByLabel('Prender todo Relieve').click({ force: true });
+    }
     await p.waitForFunction(n => window.__visor().visibles.size !== n, n0, { timeout: 5000 }).catch(() => {});
     const n1 = await capas();
-    if (modo === 'simple') { await p.locator('[data-guia=temas] button[aria-pressed]').first().click(); await p.getByRole('button', { name: 'Volver a todos los temas' }).click(); }
+    if (modo === 'simple') { await p.locator('#temas-simple button[aria-pressed]').first().click(); await p.getByRole('button', { name: 'Volver a todos los temas' }).click(); }
     else await p.getByLabel('Apagar todo Relieve').click({ force: true });
     await p.waitForFunction(n => window.__visor().visibles.size === n, n0, { timeout: 5000 }).catch(() => {});
     const n2 = await capas();
@@ -563,6 +567,7 @@ export function calor(combo, entorno) {
     const ventana = () => p.getByRole('dialog', { name: /Imprimir el mapa|Exportar a PDF/ });
 
     if (combo.modo === 'pro') {
+      await p.getByRole('button', { name: 'Capas', exact: true }).click();
       await p.getByRole('button', { name: /^Límites y localidades/ }).first().click();
       // El panel se está abriendo (animado): se confirma que el radio quedó elegido, y si no, se vuelve a tocar.
       const radioCalor = p.getByRole('radiogroup', { name: /Ver Localidades como/ }).getByRole('radio', { name: 'Calor' });
@@ -645,6 +650,7 @@ export function calor(combo, entorno) {
       const f = await estado('localidades');
       anotar('Puntos: vuelve a dibujarse con el WMS', !f.activo && f.enWms && f.visible);
     } else {
+      await p.getByRole('button', { name: '¿Qué querés ver?', exact: true }).click();
       const tarjeta = p.getByRole('button', { name: /^¿Dónde vive la gente/ });
       const antes = await estado('localidades');
       await tarjeta.click();
@@ -657,7 +663,7 @@ export function calor(combo, entorno) {
       anotar('al tocarla de nuevo vuelve a como estaba', !f.activo && f.visible === antes.visible && f.enWms === antes.enWms);
       // Densidad: escuelas como manchas.
       await p.getByRole('button', { name: /^Escuelas, salud y más/ }).click();
-      const escuelas = p.locator('[data-guia=temas] li').filter({ hasText: /^Escuelas/ }).first();
+      const escuelas = p.locator('#temas-simple li').filter({ hasText: /^Escuelas/ }).first();
       await escuelas.getByRole('button').first().click();
       await escuelas.getByRole('button', { name: /Ver como manchas/ }).click();
       await conPuntos('edif_educacion'); await esperarMapa(p);

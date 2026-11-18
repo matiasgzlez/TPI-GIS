@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useState } from 'react';
 import { Switch } from '@heroui/react';
-import { ArrowCounterClockwise, CaretDown, Eye, EyeSlash, ListBullets, MagnifyingGlass, SidebarSimple, Table, X } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, CaretDown, Eye, EyeSlash, ListBullets, MagnifyingGlass, Table, X } from '@phosphor-icons/react';
 import { miniatura } from '../interfaz';
 import { AnimatePresence, motion } from 'motion/react';
 import { unByKey } from 'ol/Observable';
@@ -15,8 +15,6 @@ interface Props {
   visor: Visor;
   // En celular el panel arranca plegado para que se vea el mapa.
   plegable: boolean;
-  // Modo profesional: pliega la barra lateral entera.
-  onPlegar?: () => void;
   // Modo profesional: abre la tabla de datos de la capa (T4).
   onTabla?: (nombre: string) => void;
   tablaAbierta?: string | null;
@@ -24,7 +22,7 @@ interface Props {
 
 // Grupos plegables con un switch por grupo y uno por capa. Minimalista: los grupos arrancan cerrados
 // y dicen en una línea qué tienen prendido; la leyenda y los ajustes de cada capa se abren a pedido.
-export default function PanelCapas({ visor, plegable, onPlegar, onTabla, tablaAbierta }: Props) {
+export default function PanelCapas({ visor, plegable, onTabla, tablaAbierta }: Props) {
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
   const [abiertos, setAbiertos] = useState<Set<string>>(() => new Set());
   // Grupos que alguna vez se abrieron: los cerrados no montan sus filas (ni piden sus miniaturas).
@@ -65,34 +63,30 @@ export default function PanelCapas({ visor, plegable, onPlegar, onTabla, tablaAb
     });
   };
   const prendidas = visor.visibles.size;
+  const Encabezado = plegable ? 'button' : 'div';
 
   return (
     <section className="panel flex min-h-0 flex-col overflow-hidden" aria-label="Capas">
       <header className="px-5 pb-4 pt-4">
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => plegable && setDesplegado(!desplegado)}
-            aria-expanded={desplegado}
-            className={`flex min-w-0 flex-1 items-center gap-2 text-left ${plegable ? '' : 'pointer-events-none'}`}
+          <Encabezado
+            type={plegable ? 'button' : undefined}
+            onClick={plegable ? () => setDesplegado(valor => !valor) : undefined}
+            aria-expanded={plegable ? desplegado : undefined}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
           >
             <h2 className="text-[20px] font-semibold tracking-[-0.02em]">Capas</h2>
             <span className="text-[14px] tabular-nums text-[var(--tinta-3)]" aria-label={`${prendidas} de ${CAPAS.length} prendidas`}>
               {prendidas}/{CAPAS.length}
             </span>
             {plegable && <CaretDown size={14} weight="bold" className={`transition-transform ${desplegado ? 'rotate-180' : ''}`} />}
-          </button>
+          </Encabezado>
           <BotonTexto onPress={() => restablecerCapas(visor)} etiqueta="Restablecer capas del inicio" soloIcono>
             <ArrowCounterClockwise size={17} />
           </BotonTexto>
           <BotonTexto onPress={() => cambiarCapas(visor, [...visor.visibles], false)} deshabilitado={!prendidas} etiqueta="Apagar todas" soloIcono>
             <EyeSlash size={17} />
           </BotonTexto>
-          {onPlegar && (
-            <BotonTexto onPress={onPlegar} etiqueta="Plegar la barra de capas" soloIcono>
-              <SidebarSimple size={17} />
-            </BotonTexto>
-          )}
         </div>
         {desplegado && (
           <>

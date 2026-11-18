@@ -88,9 +88,10 @@ export default function App() {
   const interfaz = preferencias.interfaz ?? 'simple';
   const celular = useCelular();
   const [guia, setGuia] = useState(false);
-  const [plegado, setPlegado] = useState(false);
+  const [plegado, setPlegado] = useState(true);
   const [pestana, setPestana] = useState<PestanaInspector>('informacion');
   const [temasAbierto, setTemasAbierto] = useState(false);
+  const [temasEscritorioAbiertos, setTemasEscritorioAbiertos] = useState(false);
   // Tabla de datos (T4, solo en el profesional): la capa abierta y si está agrandada. Su alto (medido) le
   // corre el borde de abajo al encuadre del mapa y sube los botones de zoom.
   const [tabla, setTabla] = useState<{ capa: string; amplia: boolean } | null>(null);
@@ -104,6 +105,7 @@ export default function App() {
   const anchoAmplio = useMedia('(min-width: 1440px)');
   const hayContenido = !!(obra || resultados || tablero);
   const inspectorPlegado = interfaz === 'pro' && !anchoAmplio && !hayContenido && pestana === 'informacion';
+  const lateralPlegado = !celular && (interfaz === 'simple' ? !temasEscritorioAbiertos : plegado);
 
   // El encuadre del mapa deja libres los bordes que tapa la interfaz a la vista.
   // El alto de la tabla vale hasta que terminó de salir (lo pone en 0 su ref al desmontarse, después de la
@@ -111,7 +113,7 @@ export default function App() {
   // Durante el render (es un valor de módulo, idempotente): así los hijos —la cortina del comparador— ya lo
   // ven en sus efectos de layout del mismo cuadro (con un efecto de App, que corre después de los de los
   // hijos, la cortina medía un cuadro tarde).
-  ponerDisposicion(interfaz, plegado, inspectorPlegado, altoTabla);
+  ponerDisposicion(interfaz, lateralPlegado, inspectorPlegado, altoTabla);
   // La hoja impresa sale con las franjas enteras: al abrir Imprimir se corta la animación de distancia (T5).
   useEffect(() => { if (exportar && visor) terminarAnimacion(visor); }, [exportar, visor]);
   // La tabla es del profesional: al pasar al simple se cierra.
@@ -572,18 +574,35 @@ export default function App() {
               <Comparador
                 visor={visor}
                 conPanel={hayContenido}
-                disposicion={`${interfaz}|${plegado}|${inspectorPlegado}|${altoTabla}|${hayContenido}`}
+                disposicion={`${interfaz}|${lateralPlegado}|${inspectorPlegado}|${altoTabla}|${hayContenido}`}
                 onCerrar={() => setComparar(false)}
               />
             </Suspense>
           )}
           {interfaz === 'simple' ? (
             <>
-              {/* Simple: buscador grande arriba, "¿Qué querés ver?" a la izquierda, botones grandes abajo. */}
-              {/* Cabecera en fila: un espacio del ancho del panel de temas, el buscador en el lugar libre y
-                  los botones a la derecha; nada se pisa a ningún ancho. */}
+              {!celular && (
+                <PanelLateral
+                  id="temas-simple"
+                  etiqueta="¿Qué querés ver?"
+                  pasoGuia="temas"
+                  abierto={temasEscritorioAbiertos}
+                  onAlternar={() => setTemasEscritorioAbiertos(valor => !valor)}
+                  className="bottom-4 left-4 top-[22px] w-[340px] gap-3 xl:w-[384px]"
+                  pie={
+                    <div className="pointer-events-auto relative z-10 flex items-center gap-2">
+                      <BarraEstado visor={visor} compacta />
+                      <BotonReferencias visor={visor} />
+                    </div>
+                  }
+                >
+                  <PanelTemas visor={visor} />
+                </PanelLateral>
+              )}
+
+              {/* Cabecera en fila: un espacio para el botón de temas, el buscador y los controles. */}
               <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-3 lg:inset-x-4 lg:top-4">
-                <div className="w-[340px] shrink-0 max-lg:hidden xl:w-[384px]" />
+                <div className="w-12 shrink-0 max-lg:hidden" />
                 <div className="entra pointer-events-auto mx-auto w-full min-w-0 lg:max-w-[620px] lg:flex-1" style={retraso(120)} data-guia="buscar">
                   <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
                 </div>
@@ -595,20 +614,6 @@ export default function App() {
                   {botonConfiguracion()}
                 </div>
               </header>
-
-              {!celular && (
-                <aside className="pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex w-[340px] flex-col gap-3 xl:w-[384px]">
-                  <div className="entra pointer-events-auto flex min-h-0 flex-1 flex-col" style={retraso(180)} data-guia="temas">
-                    <PanelTemas visor={visor} />
-                  </div>
-                  {/* Sin animación de entrada: en la tele, la escala y "Referencias" eran el LCP y la
-                      animación lo atrasaba (igual que la barra de estado de pro). */}
-                  <div className="pointer-events-auto flex items-center gap-2">
-                    <BarraEstado visor={visor} compacta />
-                    <BotonReferencias visor={visor} />
-                  </div>
-                </aside>
-              )}
 
               {panelFlotante}
 
@@ -662,9 +667,20 @@ export default function App() {
           ) : !celular ? (
             <>
               {/* Pro: barra arriba, capas a la izquierda, inspector a la derecha y estado abajo. */}
-              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-center gap-2.5">
-                <div className="entra pointer-events-auto max-xl:hidden" style={retraso(80)}><Marca angosta /></div>
-                <div className="entra pointer-events-auto min-w-[240px] flex-1" style={retraso(140)}>
+              <PanelLateral
+                id="capas-profesional"
+                etiqueta="Capas"
+                titulo={plegado ? 'Mostrar capas' : 'Ocultar capas'}
+                abierto={!plegado}
+                onAlternar={() => setPlegado(valor => !valor)}
+                className="bottom-[68px] left-3 top-[18px] w-[316px] gap-[18px] @max-[1160px]:top-[84px] @max-[1160px]:gap-3"
+              >
+                <PanelCapas visor={visor} plegable={false} onTabla={abrirTabla} tablaAbierta={tabla?.capa ?? null} />
+              </PanelLateral>
+
+              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-center gap-2.5 pl-[58px] @max-[1160px]:pl-0">
+                <div className="entra pointer-events-auto max-xl:hidden @max-[1550px]:hidden" style={retraso(80)}><Marca angosta /></div>
+                <div className="entra pointer-events-auto min-w-[240px] flex-1 @max-[1160px]:min-w-[164px]" style={retraso(140)}>
                   <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
                 </div>
                 <div className="entra pointer-events-auto" style={retraso(200)}><BarraHerramientas modo={modo} onModo={setModo} /></div>
@@ -678,39 +694,6 @@ export default function App() {
                   {botonConfiguracion(true)}
                 </div>
               </header>
-
-              <aside className="pointer-events-none absolute bottom-[68px] left-3 top-[84px] z-10 flex w-[316px] flex-col">
-                <AnimatePresence initial={false} mode="popLayout">
-                  {plegado ? (
-                    <motion.button
-                      key="riel"
-                      type="button"
-                      onClick={() => setPlegado(false)}
-                      initial={{ opacity: 0, x: -12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -12 }}
-                      transition={RESORTE_PANEL}
-                      className="panel pointer-events-auto flex w-14 flex-col items-center gap-2 py-4 text-[13px] font-semibold"
-                      aria-label={`Mostrar capas (${visor.visibles.size} prendidas)`}
-                    >
-                      <Stack size={22} />
-                      <span className="[writing-mode:vertical-rl]">Capas · <ContadorCapas visor={visor} solo /></span>
-                    </motion.button>
-                  ) : (
-                    <motion.div
-                      key="lateral"
-                      className="entra pointer-events-auto flex min-h-0 flex-1 flex-col"
-                      style={retraso(180)}
-                      initial={{ opacity: 0, x: -16 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -16 }}
-                      transition={RESORTE_PANEL}
-                    >
-                      <PanelCapas visor={visor} plegable={false} onPlegar={() => setPlegado(true)} onTabla={abrirTabla} tablaAbierta={tabla?.capa ?? null} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </aside>
 
               {inspectorPlegado ? (
                 <button
@@ -793,8 +776,10 @@ export default function App() {
               {/* Sin animación de entrada: es lo que el navegador toma como LCP y la demora lo empeoraba. */}
               <footer className="pointer-events-auto absolute inset-x-3 bottom-3 z-10">
                 <BarraEstado visor={visor} fila>
-                  <span className="h-5 w-px bg-[var(--linea)]" />
-                  <ContadorCapas visor={visor} />
+                  {!plegado && <>
+                    <span className="h-5 w-px bg-[var(--linea)]" />
+                    <ContadorCapas visor={visor} />
+                  </>}
                 </BarraEstado>
               </footer>
             </>
@@ -895,7 +880,7 @@ export default function App() {
 
 function Marca({ angosta }: { angosta?: boolean }) {
   return (
-    <div className={`panel flex h-[60px] items-center gap-3 px-4 ${angosta ? 'w-[316px]' : 'w-[340px]'}`}>
+    <div className={`panel flex h-[60px] items-center gap-3 px-4 ${angosta ? 'w-[258px]' : 'w-[340px]'}`}>
       <EscudoRuta className="h-9 w-auto shrink-0" />
       <div className="min-w-0">
         <h1 className="text-[18px] font-semibold leading-tight tracking-[-0.02em]">Visor SIG · RN11 Chaco</h1>
@@ -948,6 +933,45 @@ function BotonRuta({ estado, onPress, angosto, soloEscudo }: { estado: EstadoRut
   );
 }
 
+interface PropsPanelLateral {
+  id: string;
+  etiqueta: string;
+  titulo?: string;
+  pasoGuia?: string;
+  abierto: boolean;
+  onAlternar: () => void;
+  className: string;
+  children: React.ReactNode;
+  pie?: React.ReactNode;
+}
+
+function PanelLateral({ id, etiqueta, titulo = etiqueta, pasoGuia, abierto, onAlternar, className, children, pie }: PropsPanelLateral) {
+  return (
+    <aside className={`lateral-capas pointer-events-none absolute flex flex-col ${className}`}>
+      <button
+        type="button"
+        aria-label={etiqueta}
+        aria-controls={id}
+        aria-expanded={abierto}
+        title={titulo}
+        data-guia={pasoGuia}
+        onClick={onAlternar}
+        className="boton-capas panel pointer-events-auto relative z-20 grid size-12 shrink-0 place-items-center self-start text-[var(--tinta-2)] hover:text-[var(--tinta)] focus-visible:outline-2"
+      >
+        <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <rect className="boton-capas-relleno" x="3" y="4.5" width="7.5" height="15" rx="2" fill="currentColor" />
+          <rect x="3" y="4.5" width="18" height="15" rx="3" stroke="currentColor" strokeWidth="1.65" />
+          <path d="M10.5 5v14" stroke="currentColor" strokeWidth="1.65" />
+        </svg>
+      </button>
+      <div id={id} inert={!abierto} className="cajon-capas relative z-10 flex min-h-0 flex-1 flex-col">
+        {children}
+      </div>
+      {pie}
+    </aside>
+  );
+}
+
 function BotonRedondo({ etiqueta, onPress, compacto, activo, children }: { etiqueta: string; onPress: () => void; compacto?: boolean; activo?: boolean; children: React.ReactNode }) {
   return (
     <button
@@ -978,10 +1002,9 @@ function BotonMapa({ etiqueta, onPress, grande, children }: { etiqueta: string; 
 }
 
 // Capas prendidas, al día (la barra de estado no se redibujaba al prender o apagar).
-function ContadorCapas({ visor, solo }: { visor: Visor; solo?: boolean }) {
+function ContadorCapas({ visor }: { visor: Visor }) {
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
   useEffect(() => suscribirCapas(visor, redibujar), [visor]);
-  if (solo) return <>{visor.visibles.size}</>;
   return <span className="text-[var(--tinta-3)]"><strong className="font-semibold text-[var(--tinta)]">{visor.visibles.size}</strong> de 48 capas</span>;
 }
 

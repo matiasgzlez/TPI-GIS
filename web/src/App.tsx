@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, us
 import { createPortal } from 'react-dom';
 import { Toast, toast } from '@heroui/react';
 import { CornersOut, FilePdf, GearSix, ListBullets, Minus, Moon, Plus, Question, SplitHorizontal, Stack, Sun, Table as IconoTabla, X } from '@phosphor-icons/react';
-import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { AnimatePresence, MotionConfig, motion, useIsPresent } from 'motion/react';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import { buffer, getCenter } from 'ol/extent';
@@ -11,10 +11,14 @@ import BarraEstado from './componentes/BarraEstado';
 import Buscador from './componentes/Buscador';
 import Dock from './componentes/Dock';
 import InterruptorModo from './componentes/InterruptorModo';
+import TransicionModo, { type Pase } from './componentes/TransicionModo';
 import Acciones from './componentes/simple/Acciones';
 import PanelTemas from './componentes/simple/PanelTemas';
-import BarraHerramientas from './componentes/pro/BarraHerramientas';
-import Inspector, { type PestanaInspector } from './componentes/pro/Inspector';
+import NotchAjustes from './componentes/simple/NotchAjustes';
+import NotchTemas from './componentes/simple/NotchTemas';
+import Riel, { type Cajon } from './componentes/pro/Riel';
+import Chips, { AyudaTecnica } from './componentes/pro/Chips';
+import EstadoTecnico from './componentes/pro/EstadoTecnico';
 import LeyendaGeneral from './componentes/LeyendaGeneral';
 import { InterfazContexto, useInterfaz, hayDialogoModal, escribiendoEn, tituloSimple } from './interfaz';
 import EscudoRuta from './componentes/EscudoRuta';
@@ -30,9 +34,10 @@ import { usePrediccion } from './prediccion';
 import { claveDe, type Interpretacion } from './lenguaje';
 import { guardarObra, type DatosObra } from './obras';
 import { useTema } from './tema';
-import { usePreferencias } from './preferencias';
+import { usePreferencias, type Preferencias } from './preferencias';
+import type { Interfaz } from './interfaz';
 import { RESORTE_PANEL } from './movimiento';
-import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, capasVisibles, crearVisor, terminarAnimacion, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
+import { aplicarFactor, aplicarTema, callarRotulos, cambiarCapas, capasVisibles, crearVisor, terminarAnimacion, usarFocoSimple, dibujarRuta, ocultarRuta, ponerDisposicion, refrescarMapa, restablecerCapas, suscribirCapas, verChaco, volarA, type Visor } from './visor';
 import { tituloProvincia } from './provincias';
 import { AvisoCalor } from './componentes/Calor';
 import type { Contenido } from './exportar/pdf';
@@ -40,6 +45,8 @@ import type { Contenido } from './exportar/pdf';
 // Se cargan recién cuando hacen falta: el formulario trae Select, TextArea y el botón animado.
 const FormObra = lazy(() => import('./componentes/FormObra'));
 const PanelResultados = lazy(() => import('./componentes/PanelResultados'));
+import Isla from './componentes/simple/Isla';
+import NotchResultados from './componentes/simple/NotchResultados';
 const PanelConfiguracion = lazy(() => import('./componentes/PanelConfiguracion'));
 const TableroRuta = lazy(() => import('./componentes/TableroRuta'));
 const Bienvenida = lazy(() => import('./componentes/Bienvenida'));
@@ -49,6 +56,28 @@ const Imprimir = lazy(() => import('./exportar/Imprimir'));
 const TablaDatos = lazy(() => import('./componentes/pro/TablaDatos'));
 // Comparador deslizante (T6): la cortina y sus listas, recién al abrirlo.
 const Comparador = lazy(() => import('./componentes/Comparador'));
+
+// Corre el mapa hacia la izquierda si el notch de resultados de la derecha tapa una zona (extensión en
+// coordenadas del mapa). Todo en píxeles de pantalla: el mapa no tiene zoom de interfaz, el notch sí
+// (getBoundingClientRect ya lo cuenta).
+function despejarLado(visor: Visor, zona: number[]) {
+  const fondo = document.querySelector('.notch-resultados > .notch[data-abierta] > .notch-cuerpo');
+  if (!fondo) return;
+  const panel = fondo.getBoundingClientRect();
+  const { mapa } = visor;
+  const vp = mapa.getViewport()!.getBoundingClientRect();
+  const a = mapa.getPixelFromCoordinate([zona[0], zona[3]]), b = mapa.getPixelFromCoordinate([zona[2], zona[1]]);
+  if (!a || !b) return;
+  const [arriba, der, abajo] = [vp.top + Math.min(a[1], b[1]), vp.left + Math.max(a[0], b[0]), vp.top + Math.max(a[1], b[1])];
+  const margen = 40;
+  if (der < panel.left - margen || abajo < panel.top - 12 || arriba > panel.bottom + 12) return;
+  const correr = der - (panel.left - margen * 2);
+  const tam = mapa.getSize();
+  if (!tam) return;
+  const centro = mapa.getCoordinateFromPixel([tam[0] / 2 + correr, tam[1] / 2]);
+  const reducido = document.querySelector('[data-movimiento="reducido"]') || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  mapa.getView().animate({ center: centro, duration: reducido ? 0 : 650 });
+}
 
 const retraso = (ms: number) => ({ '--retraso': `${ms}ms` }) as React.CSSProperties;
 // Si la pantalla cumple una media query, atento a los cambios de tamaño.
@@ -73,6 +102,8 @@ export default function App() {
   const [visor, setVisor] = useState<Visor | null>(null);
   const [modo, setModo] = useState<Modo>('navegar');
   const [resultados, setResultados] = useState<EstadoResultados | null>(null);
+  // Lo último consultado (punto o rectángulo, como extensión): la isla del simple corre el mapa si lo tapa.
+  const zonaConsultada = useRef<number[] | null>(null);
   const [obra, setObra] = useState<Point | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [ruta, setRuta] = useState<EstadoRuta>({ cargando: false, activa: null });
@@ -87,11 +118,14 @@ export default function App() {
   // Simple o profesional. Hasta elegir en la bienvenida, detrás se ve el simple.
   const interfaz = preferencias.interfaz ?? 'simple';
   const celular = useCelular();
+  // El resaltado grande y naranja (con la luz que lo recorre) es del escritorio del simple.
+  useEffect(() => { if (visor) usarFocoSimple(visor, interfaz === 'simple' && !celular); }, [visor, interfaz, celular]);
+  // El panel de resultados se baja apenas el mapa está listo: así la isla se abre al tocar, sin esperar la descarga.
+  useEffect(() => { if (visor) { const reloj = setTimeout(() => { void import('./componentes/PanelResultados'); void import('./componentes/FormObra'); }, 1500); return () => clearTimeout(reloj); } }, [visor]);
   const [guia, setGuia] = useState(false);
-  const [plegado, setPlegado] = useState(true);
-  const [pestana, setPestana] = useState<PestanaInspector>('informacion');
+  // Pro: lo abierto en el cajón del riel (Capas o Leyenda), o nada.
+  const [cajon, setCajon] = useState<Cajon | null>(null);
   const [temasAbierto, setTemasAbierto] = useState(false);
-  const [temasEscritorioAbiertos, setTemasEscritorioAbiertos] = useState(false);
   // Tabla de datos (T4, solo en el profesional): la capa abierta y si está agrandada. Su alto (medido) le
   // corre el borde de abajo al encuadre del mapa y sube los botones de zoom.
   const [tabla, setTabla] = useState<{ capa: string; amplia: boolean } | null>(null);
@@ -102,10 +136,10 @@ export default function App() {
   const [comparar, setComparar] = useState(false);
   const modal = !preferencias.interfaz || guia || exportar;
   // Pro por debajo de 1440 px (la notebook de 1366): sin nada que mostrar, el inspector se pliega a un botón y le deja el lugar al mapa.
-  const anchoAmplio = useMedia('(min-width: 1440px)');
   const hayContenido = !!(obra || resultados || tablero);
-  const inspectorPlegado = interfaz === 'pro' && !anchoAmplio && !hayContenido && pestana === 'informacion';
-  const lateralPlegado = !celular && (interfaz === 'simple' ? !temasEscritorioAbiertos : plegado);
+  // En el simple, "Capas" se abre solo mientras el cursor está encima (es pasajera): para el encuadre del
+  // mapa y la cortina cuenta siempre como recogida, y abrirla no vuelve a dibujar la App.
+  const lateralPlegado = !celular && (interfaz === 'simple' ? true : !cajon);
 
   // El encuadre del mapa deja libres los bordes que tapa la interfaz a la vista.
   // El alto de la tabla vale hasta que terminó de salir (lo pone en 0 su ref al desmontarse, después de la
@@ -113,15 +147,12 @@ export default function App() {
   // Durante el render (es un valor de módulo, idempotente): así los hijos —la cortina del comparador— ya lo
   // ven en sus efectos de layout del mismo cuadro (con un efecto de App, que corre después de los de los
   // hijos, la cortina medía un cuadro tarde).
-  ponerDisposicion(interfaz, lateralPlegado, inspectorPlegado, altoTabla);
+  ponerDisposicion(interfaz, lateralPlegado, altoTabla);
   // La hoja impresa sale con las franjas enteras: al abrir Imprimir se corta la animación de distancia (T5).
   useEffect(() => { if (exportar && visor) terminarAnimacion(visor); }, [exportar, visor]);
   // La tabla es del profesional: al pasar al simple se cierra.
   useEffect(() => { if (interfaz !== 'pro') setTabla(null); }, [interfaz]);
-  // En el profesional, un resultado nuevo o el tablero se muestran en "Información".
-  useEffect(() => {
-    if (resultados || tablero || obra) setPestana('informacion');
-  }, [resultados, tablero, obra]);
+
 
   // El mapa de OpenLayers se crea una sola vez; React maneja los paneles de alrededor.
   useEffect(() => {
@@ -211,9 +242,12 @@ export default function App() {
   useEffect(() => {
     if (!visor) return;
     setObra(null);
-    if (modo === 'navegar' || modo === 'alta') setResultados(null);
+    // En el escritorio del simple los resultados van en el notch de la derecha: al cambiar de herramienta se
+    // cierran, así no tapan el mapa donde se va a tocar.
+    const enLadoAhora = interfazActual.current === 'simple' && !matchMedia('(max-width: 1023px)').matches;
+    if (modo === 'navegar' || modo === 'alta' || enLadoAhora) setResultados(null);
     return activarHerramienta(visor, modo, {
-      consultando: origen => setResultados({ tipo: 'cargando', origen }),
+      consultando: (origen, zona) => { zonaConsultada.current = zona ?? null; setResultados({ tipo: 'cargando', origen }); },
       consulta: consulta => {
         setResultados({ tipo: 'consulta', consulta });
         // En la consulta por punto, lo más relevante (la capa de más arriba) queda seleccionado y late.
@@ -270,7 +304,7 @@ export default function App() {
   function cerrarTabla() {
     const adentro = !!document.activeElement?.closest('section[aria-label^="Tabla de datos:"]');
     setTabla(null);
-    if (adentro) requestAnimationFrame(() => document.querySelector<HTMLElement>('button[aria-label="Tabla de datos (T)"]')?.focus());
+    if (adentro) requestAnimationFrame(() => document.querySelector<HTMLElement>('button[aria-label="Tabla de datos (T)"], button[aria-label="Tabla de atributos (T)"]')?.focus());
   }
   function alternarTabla() {
     if (tabla) { cerrarTabla(); return; }
@@ -472,10 +506,10 @@ export default function App() {
       consulta: resultados.consulta,
       titulo: resultados.consulta.titulo
         ? (interfaz === 'simple' ? tituloSimple(resultados.consulta.titulo, resultados.consulta.capas) : resultados.consulta.titulo)
-        : resultados.consulta.origen === 'punto' ? (interfaz === 'simple' ? 'Qué hay en este lugar' : 'Consulta por punto') : (interfaz === 'simple' ? 'Lo que hay en la zona' : 'Consulta por rectángulo'),
+        : resultados.consulta.origen === 'punto' ? (interfaz === 'simple' ? 'Qué hay en este lugar' : 'Consulta por punto · GetFeatureInfo') : (interfaz === 'simple' ? 'Lo que hay en la zona' : 'Consulta por rectángulo · WFS BBOX'),
     }
     : resultados?.tipo === 'medicion' && resultados.medicion.terminada
-      ? { tipo: 'medicion', medicion: resultados.medicion, titulo: resultados.medicion.tipo === 'distancia' ? (interfaz === 'simple' ? 'Qué tan lejos' : 'Distancia medida') : (interfaz === 'simple' ? 'Qué tan grande' : 'Área medida') }
+      ? { tipo: 'medicion', medicion: resultados.medicion, titulo: resultados.medicion.tipo === 'distancia' ? (interfaz === 'simple' ? 'Qué tan lejos' : 'Longitud geodésica') : (interfaz === 'simple' ? 'Qué tan grande' : 'Área geodésica') }
       : tablero?.analisis
         ? { tipo: 'tablero', analisis: tablero.analisis, titulo: `${interfaz === 'simple' ? 'La ruta' : 'Ruta Nacional'} ${tablero.ruta.numero} en ${tituloProvincia(tablero.ruta.provincia)}` }
         : null, [resultados, tablero, interfaz]);
@@ -503,6 +537,37 @@ export default function App() {
     </Suspense>
   ) : null;
 
+  // El pase de un modo al otro (TransicionModo): la pantalla blanca nace del botón que se tocó. Con
+  // movimiento reducido no hay pase: se cambia en el acto. `foco`: si se cambió con el teclado, al terminar
+  // el foco vuelve al interruptor del modo nuevo.
+  const [pase, setPase] = useState<(Pase & { foco: boolean }) | null>(null);
+  const cambiarModo = useCallback((v: Interfaz) => {
+    if (v === interfaz || pase) return;
+    const reducido = preferencias.movimientoReducido || matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducido) { cambiarPreferencia('interfaz', v); return; }
+    const activo = document.activeElement as HTMLElement | null;
+    const caja = activo && activo !== document.body ? activo.getBoundingClientRect() : null;
+    const x = caja && caja.width ? caja.left + caja.width / 2 : innerWidth - 120;
+    const y = caja && caja.height ? caja.top + caja.height / 2 : 40;
+    setPase({ de: interfaz, a: v, x, y, foco: !!activo?.closest('[role="radiogroup"]') && activo.matches(':focus-visible') });
+  }, [interfaz, pase, preferencias.movimientoReducido, cambiarPreferencia]);
+  const cambiarConPase = useCallback(<K extends keyof Preferencias>(clave: K, valor: Preferencias[K]) => {
+    if (clave === 'interfaz') cambiarModo(valor as Interfaz);
+    else cambiarPreferencia(clave, valor);
+  }, [cambiarModo, cambiarPreferencia]);
+  const alCubrir = useCallback(() => { if (pase) cambiarPreferencia('interfaz', pase.a); }, [pase, cambiarPreferencia]);
+  const alTerminarPase = useCallback(() => {
+    const foco = pase?.foco;
+    setPase(null);
+    if (foco) [...document.querySelectorAll<HTMLElement>('[aria-label="Tipo de pantalla"] [aria-checked="true"]')].find(el => el.getClientRects().length > 0)?.focus();
+  }, [pase]);
+
+  // Estables, para que NotchAjustes (memo) no se vuelva a dibujar con cada cambio de la App.
+  const abrirGuia = useCallback(() => { setConfiguracion(false); setGuia(true); }, []);
+  const abrirManual = useCallback(() => setConfiguracion(true), []);
+  const [referencias, setReferencias] = useState(false);
+  const abrirReferencias = useCallback(() => setReferencias(true), []);
+  const cerrarReferencias = useCallback(() => setReferencias(false), []);
   const botonesTema = (compacto?: boolean) => (
     <BotonRedondo etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={() => cambiarTema(!oscuro)} compacto={compacto}>
       {oscuro ? <Sun size={compacto ? 20 : 21} weight="bold" /> : <Moon size={compacto ? 20 : 21} weight="bold" />}
@@ -513,11 +578,7 @@ export default function App() {
       <GearSix size={compacto ? 21 : 22} weight="bold" />
     </BotonRedondo>
   );
-  const interruptor = (
-    <div className="panel p-1">
-      <InterruptorModo valor={interfaz} onCambiar={v => cambiarPreferencia('interfaz', v)} className="w-[150px] bg-transparent max-lg:w-[124px]" />
-    </div>
-  );
+  const interruptor = <InterruptorModo valor={interfaz} onCambiar={cambiarModo} compacto className="max-lg:w-[124px]" />;
   const zoomBotones = (grande?: boolean) => (
     <div className="panel pointer-events-auto flex flex-col p-1.5">
       <BotonMapa etiqueta={grande ? 'Acercar el mapa' : 'Acercar'} onPress={() => zoom(1)} grande={grande}><Plus size={grande ? 24 : 20} /></BotonMapa>
@@ -536,13 +597,40 @@ export default function App() {
     </div>
   );
 
-  // Panel flotante de la derecha (modo simple y celular).
+  // Panel flotante de la derecha (modo simple y celular). En el escritorio del simple, los resultados (qué hay,
+  // la zona, la medida y las preguntas) salen en cambio del notch de la derecha, en el lugar de Ajustes.
+  const enLado = interfaz === 'simple' && !celular && (!!resultados || !!obra);
+  // El notch de resultados sigue puesto mientras se recoge; recién al terminar vuelve el de Ajustes.
+  const [ladoPuesto, setLadoPuesto] = useState(false);
+  useEffect(() => { if (enLado) setLadoPuesto(true); }, [enLado]);
+  // Al recogerse, si el foco quedó en la nada (estaba adentro del notch que se cerró), pasa a la pastilla de
+  // Ajustes, que vuelve a su lugar.
+  const alRecogerLado = useCallback(() => {
+    setLadoPuesto(false);
+    requestAnimationFrame(() => {
+      const activo = document.activeElement;
+      if (activo && activo !== document.body && !activo.classList.contains('notch-resultados')) return;
+      document.querySelector<HTMLElement>('[aria-label="Ajustes"]')?.focus({ preventScroll: true });
+    });
+  }, []);
+  // Abierto el notch (0,6 s), si tapa lo consultado (el punto, el rectángulo o lo medido), el mapa se corre lo
+  // justo para que quede a la vista, a su izquierda.
+  const listoParaDespejar = !!resultados && (resultados.tipo === 'consulta' || (resultados.tipo === 'medicion' && resultados.medicion.terminada));
+  useEffect(() => {
+    if (!visor || !enLado || !listoParaDespejar) return;
+    const zona = resultados?.tipo === 'medicion'
+      ? (visor.dibujo.getFeatures().length ? visor.dibujo.getExtent() : null)
+      : resultados?.tipo === 'consulta' && resultados.consulta.origen !== 'lenguaje' ? zonaConsultada.current : null;
+    if (!zona) return;
+    const reloj = setTimeout(() => despejarLado(visor, zona), 650);
+    return () => clearTimeout(reloj);
+  }, [visor, enLado, listoParaDespejar, resultados]);
   const panelFlotante = (
     <AnimatePresence>
-      {contenidoPanel && (
+      {contenidoPanel && !enLado && (
         <motion.div
           key={obra ? 'obra' : resultados ? 'resultados' : 'tablero'}
-          className={`pointer-events-none absolute right-4 top-[92px] z-10 flex w-[400px] flex-col max-lg:inset-x-3 max-lg:bottom-[110px] max-lg:top-auto max-lg:max-h-[46cqh] max-lg:w-auto ${interfaz === 'simple' ? 'bottom-[228px] max-lg:bottom-[118px]' : 'bottom-[184px]'}`}
+          className={`pointer-events-none absolute right-4 top-[92px] z-10 flex ${interfaz === 'simple' && resultados && !obra ? 'w-[440px]' : 'w-[400px]'} flex-col max-lg:inset-x-3 max-lg:bottom-[110px] max-lg:top-auto max-lg:max-h-[46cqh] max-lg:w-auto ${interfaz === 'simple' ? 'bottom-[228px] max-lg:bottom-[118px] lg:right-[72px]' : 'bottom-[184px]'}`}
           initial={{ opacity: 0, x: 32, scale: 0.98 }}
           animate={{ opacity: 1, x: 0, scale: 1 }}
           exit={{ opacity: 0, x: 32, scale: 0.98 }}
@@ -574,7 +662,7 @@ export default function App() {
               <Comparador
                 visor={visor}
                 conPanel={hayContenido}
-                disposicion={`${interfaz}|${lateralPlegado}|${inspectorPlegado}|${altoTabla}|${hayContenido}`}
+                disposicion={`${interfaz}|${lateralPlegado}|${altoTabla}|${hayContenido}`}
                 onCerrar={() => setComparar(false)}
               />
             </Suspense>
@@ -582,50 +670,79 @@ export default function App() {
           {interfaz === 'simple' ? (
             <>
               {!celular && (
-                <PanelLateral
-                  id="temas-simple"
-                  etiqueta="¿Qué querés ver?"
-                  pasoGuia="temas"
-                  abierto={temasEscritorioAbiertos}
-                  onAlternar={() => setTemasEscritorioAbiertos(valor => !valor)}
-                  className="bottom-4 left-4 top-[22px] w-[340px] gap-3 xl:w-[384px]"
-                  pie={
-                    <div className="pointer-events-auto relative z-10 flex items-center gap-2">
-                      <BarraEstado visor={visor} compacta />
-                      <BotonReferencias visor={visor} />
-                    </div>
-                  }
-                >
-                  <PanelTemas visor={visor} />
-                </PanelLateral>
+                <>
+                  {/* "Capas": la pastilla negra del centro del borde izquierdo, que se estira hasta ser el panel. */}
+                  <aside className="entra pointer-events-none absolute bottom-[76px] left-0 top-[84px] z-30 flex" style={retraso(80)}>
+                    <NotchTemas visor={visor} />
+                  </aside>
+                  {/* La escala, sola: Referencias se mudó a la pastilla "Ajustes". */}
+                  <div className="pointer-events-auto absolute bottom-3 left-4 z-20">
+                    <BarraEstado visor={visor} negra />
+                  </div>
+                </>
               )}
 
-              {/* Cabecera en fila: un espacio para el botón de temas, el buscador y los controles. */}
-              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-3 lg:inset-x-4 lg:top-4">
-                <div className="w-12 shrink-0 max-lg:hidden" />
-                <div className="entra pointer-events-auto mx-auto w-full min-w-0 lg:max-w-[620px] lg:flex-1" style={retraso(120)} data-guia="buscar">
-                  <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
-                </div>
-                <div className="entra pointer-events-auto flex shrink-0 items-center gap-2.5 max-lg:hidden" style={retraso(200)}>
-                  <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} angosto />
-                  {interruptor}
-                  <BotonRedondo etiqueta="Ayuda: cómo se usa" onPress={() => setGuia(true)}><Question size={22} weight="bold" /></BotonRedondo>
-                  <div className="max-xl:hidden">{botonesTema()}</div>
-                  {botonConfiguracion()}
-                </div>
-              </header>
+              {celular ? (
+                <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-start gap-3">
+                  <div className="entra pointer-events-auto mx-auto w-full min-w-0" style={retraso(120)} data-guia="buscar">
+                    <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
+                  </div>
+                </header>
+              ) : (
+                <>
+                  {/* Arriba: el buscador negro al centro y el interruptor Simple / Pro metido en la esquina. */}
+                  <Isla style={retraso(120)}>
+                    <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} negro />
+                  </Isla>
+                  <div className="entra pointer-events-auto absolute right-3 top-3 z-20" style={retraso(200)}>
+                    <InterruptorModo valor={interfaz} onCambiar={cambiarModo} grande />
+                  </div>
+                  {/* "Ajustes": la pastilla del centro del borde derecho, espejo de "Capas" (tema, tamaño, guía y
+                      manual y referencias). Abierta se apoya arriba del bloque del minimapa (termina 248 px antes del
+                      borde) y la pastilla cerrada queda a la altura de la de Capas (--notch-centro en estilos.css). El panel de resultados se corre a su izquierda (ver panelFlotante). */}
+                  <aside className="ajustes-lugar entra pointer-events-none absolute bottom-[248px] right-0 top-[84px] z-30 flex w-[640px] flex-col items-end justify-end" style={retraso(160)}>
+                    {enLado || ladoPuesto ? (
+                      <NotchResultados contenido={enLado ? contenidoPanel : null} onRecogida={alRecogerLado} />
+                    ) : (
+                      <NotchAjustes
+                        preferencias={preferencias}
+                        onCambiar={cambiarPreferencia}
+                        oscuro={oscuro}
+                        onTema={cambiarTema}
+                        onGuia={abrirGuia}
+                        onManual={abrirManual}
+                        onReferencias={abrirReferencias}
+                      />
+                    )}
+                  </aside>
+                  <PanelReferencias visor={visor} abierto={referencias} onCerrar={cerrarReferencias} />
+                </>
+              )}
 
               {panelFlotante}
 
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center max-lg:bottom-3 lg:left-[360px] lg:right-[96px] xl:left-[404px] 2xl:left-0 2xl:right-0">
-                <div className="entra pointer-events-auto" style={retraso(260)}>
-                  <Acciones modo={modo} onModo={setModo} sinPista={!!obra || exportar} imprimiendo={exportar} onImprimir={() => setExportar(e => !e)} comparando={comparar} onComparar={alternarComparar} />
+              {celular ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+                  <div className="entra pointer-events-auto" style={retraso(260)}>
+                    <Acciones modo={modo} onModo={setModo} sinPista={!!obra || exportar} imprimiendo={exportar} onImprimir={() => setExportar(e => !e)} comparando={comparar} onComparar={alternarComparar} />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                // "Herramientas": la pastilla del centro del borde de abajo, que se estira hacia arriba con los botones.
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center">
+                  <div className="entra pointer-events-none" style={retraso(260)}>
+                    <Acciones enNotch modo={modo} onModo={setModo} sinPista={!!obra || exportar} imprimiendo={exportar} onImprimir={() => setExportar(e => !e)} comparando={comparar} onComparar={alternarComparar} />
+                  </div>
+                </div>
+              )}
               {!celular && (
-                <div className="controles-mapa pointer-events-none absolute bottom-4 right-4 z-10 flex items-end gap-3">
-                  {preferencias.minimapa && <div className="entra pointer-events-auto max-xl:hidden" style={retraso(440)}><Minimapa visor={visor} /></div>}
-                  <div className="entra" style={retraso(380)}>{zoomBotones(true)}</div>
+                // Un solo bloque negro: el minimapa arriba y debajo "−" y "+" bien grandes. Nada más.
+                <div className="controles-mapa entra superficie-notch pointer-events-auto absolute bottom-4 right-4 z-10 flex flex-col gap-1.5 rounded-[22px] bg-[var(--notch-fondo)] p-1.5 text-white shadow-[0_10px_30px_-12px_rgba(0,0,0,.45)]" style={retraso(380)}>
+                  {preferencias.minimapa && <div className="max-xl:hidden [&_.minimapa]:size-[140px] [&_.minimapa]:rounded-[16px] [&_.minimapa]:shadow-none"><Minimapa visor={visor} /></div>}
+                  <div className="dark flex gap-1.5">
+                    <button type="button" aria-label="Alejar el mapa" title="Alejar el mapa" onClick={() => zoom(-1)} className="boton-zoom"><Minus size={28} weight="bold" /></button>
+                    <button type="button" aria-label="Acercar el mapa" title="Acercar el mapa" onClick={() => zoom(1)} className="boton-zoom"><Plus size={28} weight="bold" /></button>
+                  </div>
                 </div>
               )}
 
@@ -666,69 +783,102 @@ export default function App() {
             </>
           ) : !celular ? (
             <>
-              {/* Pro: barra arriba, capas a la izquierda, inspector a la derecha y estado abajo. */}
-              <PanelLateral
-                id="capas-profesional"
-                etiqueta="Capas"
-                titulo={plegado ? 'Mostrar capas' : 'Ocultar capas'}
-                abierto={!plegado}
-                onAlternar={() => setPlegado(valor => !valor)}
-                className="bottom-[68px] left-3 top-[18px] w-[316px] gap-[18px] @max-[1160px]:top-[84px] @max-[1160px]:gap-3"
-              >
-                <PanelCapas visor={visor} plegable={false} onTabla={abrirTabla} tablaAbierta={tabla?.capa ?? null} />
-              </PanelLateral>
+              {/* Pro, como un mapa web: el riel de la izquierda (y su cajón de Capas o Leyenda), el buscador
+                  arriba con lo consultado debajo, las herramientas como chips, el minimapa abajo a la izquierda,
+                  el zoom abajo a la derecha y la barra de estado de punta a punta. --izq: hasta dónde llega lo
+                  de la izquierda (el riel y el cajón abierto); --abajo: el borde de abajo libre (sobre la barra
+                  de estado y, si está abierta, la tabla). */}
+              <div className="pro-maps contents" style={{ '--izq': `calc(var(--ancho-riel) + ${cajon ? 'var(--ancho-cajon)' : '0px'})`, '--abajo': `calc(var(--alto-estado) + 16px + ${altoTabla ? `${altoTabla + 12}px` : '0px'})`, ...(preferencias.minimapa ? {} : { '--alto-mini': '-14px' }) } as React.CSSProperties}>
+                <Riel
+                  estilo={retraso(40)}
+                  cajon={cajon}
+                  onCajon={setCajon}
+                  tabla={!!tabla}
+                  onTabla={alternarTabla}
+                  comparar={comparar}
+                  onComparar={alternarComparar}
+                  onImprimir={() => setExportar(e => !e)}
+                  oscuro={oscuro}
+                  onTema={() => cambiarTema(!oscuro)}
+                  onAjustes={() => setConfiguracion(true)}
+                />
 
-              <header className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-center gap-2.5 pl-[58px] @max-[1160px]:pl-0">
-                <div className="entra pointer-events-auto max-xl:hidden @max-[1550px]:hidden" style={retraso(80)}><Marca angosta /></div>
-                <div className="entra pointer-events-auto min-w-[240px] flex-1 @max-[1160px]:min-w-[164px]" style={retraso(140)}>
+              {/* El cajón: se abre pegado al riel, de arriba abajo. Queda siempre armado (cerrado, inerte y fuera
+                  de la vista): así recuerda qué grupos de capas estaban abiertos y dónde estaba el desplazamiento. */}
+              <aside
+                id="cajon-pro"
+                aria-label={cajon === 'leyenda' ? 'Leyenda' : 'Capas'}
+                inert={!cajon}
+                data-abierto={cajon ? true : undefined}
+                className="cajon-pro pointer-events-auto absolute bottom-[var(--alto-estado)] left-[var(--ancho-riel)] top-0 z-20 flex w-[var(--ancho-cajon)] flex-col"
+              >
+                <button type="button" onClick={() => setCajon(null)} aria-label={`Cerrar ${cajon === 'leyenda' ? 'la leyenda' : 'las capas'}`} title="Cerrar" className="cajon-cerrar absolute right-3 top-3.5 z-10 grid size-10 place-items-center rounded-full"><X size={18} weight="bold" /></button>
+                <div hidden={cajon === 'leyenda'} className="flex min-h-0 flex-1 flex-col">
+                  <PanelCapas visor={visor} plegable={false} onTabla={abrirTabla} tablaAbierta={tabla?.capa ?? null} />
+                  <p className="cajon-pie shrink-0 border-t border-[var(--linea)] px-5 py-3 text-[12.5px] leading-snug text-[var(--tinta-3)]">
+                    <strong className="font-semibold text-[var(--tinta-2)]">Fuente:</strong> IGN · SIG 250 · GeoServer (workspace <code className="font-mono">tpi</code>) · WMS 1.3.0 en teselas de 512 px · SRC EPSG:3857
+                  </p>
+                </div>
+                {cajon === 'leyenda' && (
+                  <section className="flex min-h-0 flex-1 flex-col">
+                    <header className="px-5 pb-3.5 pt-[18px] pr-16">
+                      <h2 className="text-[20px] font-semibold tracking-[-0.02em]">Leyenda</h2>
+                      <p className="mt-1 text-[13px] leading-snug text-[var(--tinta-3)]">Simbología de las capas visibles · WMS GetLegendGraphic con el SLD de cada capa</p>
+                    </header>
+                    <section tabIndex={0} aria-label="Leyenda de las capas prendidas" className="desplazable min-h-0 flex-1 overflow-y-auto border-t border-[var(--linea)] focus-visible:outline-2">
+                      <LeyendaGeneral visor={visor} />
+                    </section>
+                  </section>
+                )}
+              </aside>
+
+              {/* Arriba: el buscador (una tarjeta, como la de un mapa web), los chips y el interruptor de modo. */}
+              <header className="encabezado-pro pointer-events-none absolute left-[calc(var(--izq)+16px)] right-4 top-3 z-20 flex items-start gap-3">
+                <div className="buscador-pro entra pointer-events-auto w-[var(--ancho-columna)] shrink-0" style={retraso(100)}>
                   <Buscador capaPrendida={nombre => visor.visibles.has(nombre)} enVista={enVista} onElegir={elegir} />
                 </div>
-                <div className="entra pointer-events-auto" style={retraso(200)}><BarraHerramientas modo={modo} onModo={setModo} /></div>
-                <div className="entra pointer-events-auto flex items-center gap-2" style={retraso(260)}>
-                  <BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} angosto />
-                  <BotonRedondo etiqueta={tabla ? 'Cerrar la tabla de datos (T)' : 'Tabla de datos (T)'} onPress={alternarTabla} compacto activo={!!tabla}><IconoTabla size={21} weight="bold" /></BotonRedondo>
-                  <BotonRedondo etiqueta="Comparar dos juegos de capas (C)" onPress={alternarComparar} compacto activo={comparar}><SplitHorizontal size={21} weight="bold" /></BotonRedondo>
-                  <BotonRedondo etiqueta="Exportar a PDF" onPress={() => setExportar(e => !e)} compacto><FilePdf size={21} weight="bold" /></BotonRedondo>
-                  {interruptor}
-                  {botonesTema(true)}
-                  {botonConfiguracion(true)}
+                <div className="entra pointer-events-auto mt-[2px] min-w-0 flex-1" style={retraso(160)}>
+                  <Chips modo={modo} onModo={setModo} extra={<BotonRuta estado={ruta} onPress={() => mostrarRuta(RN11, true)} chip />} />
                 </div>
+                <div className="entra pointer-events-auto mt-[5px] shrink-0" style={retraso(220)}>{interruptor}</div>
               </header>
 
-              {inspectorPlegado ? (
-                <button
-                  type="button"
-                  onClick={() => setPestana('leyenda')}
-                  className="entra panel pointer-events-auto absolute right-3 top-[84px] z-10 flex h-11 items-center gap-2 px-4 text-[14px] font-semibold"
-                  style={retraso(240)}
-                >
-                  <ListBullets size={17} weight="bold" /> Leyenda
-                </button>
-              ) : (
-                <aside className="entra pointer-events-none absolute bottom-[68px] right-3 top-[84px] z-10 flex w-[392px] flex-col" style={retraso(240)}>
-                  <div className="pointer-events-auto flex min-h-0 flex-1 flex-col">
-                    <Inspector visor={visor} pestana={pestana} onPestana={setPestana} contenido={contenidoPanel} />
-                  </div>
-                </aside>
-              )}
+              {/* Lo consultado: debajo del buscador, del alto de su contenido (como mucho, hasta el minimapa). */}
+              <AnimatePresence>
+                {contenidoPanel && (
+                  <motion.div
+                    key={obra ? 'obra' : resultados ? 'resultados' : 'tablero'}
+                    className="columna-pro pointer-events-none absolute left-[calc(var(--izq)+16px)] top-[84px] z-10 flex w-[var(--ancho-columna)] flex-col"
+                    style={{ bottom: 'calc(var(--abajo) + var(--alto-mini) + 14px)' }}
+                    initial={{ opacity: 0, y: -10, scale: 0.985 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.985 }}
+                    transition={RESORTE_PANEL}
+                  >
+                    <Tocable>{contenidoPanel}</Tocable>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              {/* Indicación de la herramienta activa, arriba del mapa. */}
+              {/* Qué hacer con la herramienta elegida: debajo de los chips. */}
               <AnimatePresence>
                 {modo !== 'navegar' && !obra && (
                   <motion.p
                     key={modo}
-                    className="panel pointer-events-none absolute left-1/2 top-[84px] z-10 -translate-x-1/2 px-4 py-2 text-[14px] font-medium text-[var(--tinta-2)]"
+                    role="status"
+                    className="ayuda-pro panel pointer-events-none absolute top-[78px] z-10 px-4 py-2.5 text-[14.5px] font-medium"
+                    style={{ left: 'calc(var(--izq) + 16px + var(--ancho-columna) + 16px)' }}
                     initial={{ opacity: 0, y: -6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={RESORTE_PANEL}
                   >
-                    {HERRAMIENTAS[modo].ayuda}
+                    <AyudaTecnica modo={modo} />
                   </motion.p>
                 )}
               </AnimatePresence>
 
-              {/* La tabla de datos: un cajón entre las capas y el inspector, sobre la barra de estado. */}
+              {/* La tabla de datos: un cajón abajo, entre lo de la izquierda y el zoom, sobre la barra de estado. */}
               <AnimatePresence>
                 {tabla && (
                   <motion.div
@@ -745,10 +895,11 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 28 }}
                     transition={RESORTE_PANEL}
-                    className="pointer-events-auto absolute bottom-[68px] z-10 flex flex-col"
-                    style={{ left: plegado ? 80 : 340, right: inspectorPlegado ? 12 : 416, // Con la animación de distancia abierta, la tabla no sube más allá de su panel y deja 200 px de mapa
+                    className="pointer-events-auto absolute bottom-[calc(var(--alto-estado)+16px)] left-[calc(var(--izq)+16px)] right-[84px] z-10 flex flex-col"
+                    style={{ transition: 'height .45s var(--ios), left .45s var(--ios)',
+                      // Con la animación de distancia abierta, la tabla no sube más allá de su panel y deja 200 px de mapa
                       // (para el zoom y el comparador): --fondo-franja lo pone el panel (CrecerFranja).
-                      height: `min(${tabla.amplia ? 'calc((100% - 164px) * 0.68)' : 'max(calc((100% - 164px) * 0.42), min(320px, calc(100% - 300px)))'}, calc(100% - 268px - var(--fondo-franja, 0px) - var(--reserva-comparador, 0px)))`, transition: 'height .45s var(--ios), left .3s, right .3s' }}
+                      height: `min(${tabla.amplia ? 'calc((100% - 164px) * 0.68)' : 'max(calc((100% - 164px) * 0.42), min(320px, calc(100% - 300px)))'}, calc(100% - 268px - var(--fondo-franja, 0px) - var(--reserva-comparador, 0px)))` }}
                   >
                     <Suspense fallback={<div className="panel h-full" />}>
                       <TablaDatos
@@ -758,7 +909,7 @@ export default function App() {
                         amplia={tabla.amplia}
                         onAmplia={amplia => setTabla(t => t && { ...t, amplia })}
                         onCerrar={cerrarTabla}
-                        bordes={`${plegado}|${inspectorPlegado}`}
+                        bordes={`${cajon}`}
                         onIrA={consulta => { setTablero(null); setResultados({ tipo: 'consulta', consulta }); }}
                         onLimpiar={cerrarResultados}
                         recargaObras={recargaObras}
@@ -768,20 +919,29 @@ export default function App() {
                 )}
               </AnimatePresence>
 
-              <div className={`controles-mapa pointer-events-none absolute z-10 flex items-end gap-3 transition-[bottom] duration-300 ${inspectorPlegado ? 'right-3' : 'right-[408px]'}`} style={{ bottom: 68 + (altoTabla ? altoTabla + 12 : 0) }}>
-                <div className="entra" style={retraso(420)}>{zoomBotones()}</div>
-                {preferencias.minimapa && <div className="entra pointer-events-auto" style={retraso(480)}><Minimapa visor={visor} /></div>}
+              {/* Abajo a la izquierda, el minimapa (la miniatura de un mapa web). */}
+              {preferencias.minimapa && (
+                <div className="controles-mapa minimapa-pro entra pointer-events-auto absolute left-[calc(var(--izq)+16px)] z-10" style={{ ...retraso(420), bottom: 'var(--abajo)' }}>
+                  <Minimapa visor={visor} />
+                </div>
+              )}
+
+              {/* Abajo a la derecha: ver todo el Chaco y el zoom, como los controles de un mapa web. */}
+              <div className="controles-mapa controles-pro entra pointer-events-none absolute right-4 z-10 flex flex-col items-center gap-2.5" style={{ ...retraso(460), bottom: 'var(--abajo)' }}>
+                <button type="button" aria-label="Ver Chaco completo" title="Ver Chaco completo" onClick={() => verChaco(visor)} className="boton-control-pro panel pointer-events-auto grid size-12 place-items-center rounded-full"><CornersOut size={21} weight="bold" /></button>
+                <div className="panel pointer-events-auto flex w-12 flex-col items-center overflow-hidden rounded-[24px]">
+                  <button type="button" aria-label="Acercar" title="Acercar" onClick={() => zoom(1)} className="boton-control-pro grid h-12 w-12 place-items-center"><Plus size={21} weight="bold" /></button>
+                  <span aria-hidden="true" className="h-px w-7 bg-[var(--linea)]" />
+                  <button type="button" aria-label="Alejar" title="Alejar" onClick={() => zoom(-1)} className="boton-control-pro grid h-12 w-12 place-items-center"><Minus size={21} weight="bold" /></button>
+                </div>
               </div>
 
-              {/* Sin animación de entrada: es lo que el navegador toma como LCP y la demora lo empeoraba. */}
-              <footer className="pointer-events-auto absolute inset-x-3 bottom-3 z-10">
-                <BarraEstado visor={visor} fila>
-                  {!plegado && <>
-                    <span className="h-5 w-px bg-[var(--linea)]" />
-                    <ContadorCapas visor={visor} />
-                  </>}
-                </BarraEstado>
+              {/* La barra de estado, de punta a punta (sin animación de entrada: es lo que el navegador toma
+                  como LCP y la demora lo empeoraba). */}
+              <footer className="estado-pro pointer-events-auto absolute inset-x-0 bottom-0 z-30">
+                <EstadoTecnico visor={visor} />
               </footer>
+              </div>
             </>
           ) : (
             <>
@@ -820,10 +980,11 @@ export default function App() {
               <Suspense fallback={null}>
                 <PanelConfiguracion
                   preferencias={preferencias}
-                  onCambiar={cambiarPreferencia}
+                  onCambiar={cambiarConPase}
                   oscuro={oscuro}
                   onTema={cambiarTema}
                   onCerrar={() => setConfiguracion(false)}
+                  onGuia={interfaz === 'simple' ? () => { setConfiguracion(false); setGuia(true); } : undefined}
                 />
               </Suspense>
             )}
@@ -874,26 +1035,32 @@ export default function App() {
       )}
 
       <Toast.Provider placement="top end" />
+      {pase && <TransicionModo pase={pase} onCubierta={alCubrir} onFin={alTerminarPase} />}
     </>
   );
 }
 
-function Marca({ angosta }: { angosta?: boolean }) {
-  return (
-    <div className={`panel flex h-[60px] items-center gap-3 px-4 ${angosta ? 'w-[258px]' : 'w-[340px]'}`}>
-      <EscudoRuta className="h-9 w-auto shrink-0" />
-      <div className="min-w-0">
-        <h1 className="text-[18px] font-semibold leading-tight tracking-[-0.02em]">Visor SIG · RN11 Chaco</h1>
-        <p className="text-[13px] leading-tight text-[var(--tinta-3)]">IGN SIG 250 · UTN FRRe 2026</p>
-      </div>
-    </div>
-  );
-}
-
 // Sin ruta a la vista abre la RN11; con una ruta elegida (la RN11 u otra por doble clic) la oculta.
-function BotonRuta({ estado, onPress, angosto, soloEscudo }: { estado: EstadoRuta; onPress: () => void; angosto?: boolean; soloEscudo?: boolean }) {
+function BotonRuta({ estado, onPress, angosto, soloEscudo, chip }: { estado: EstadoRuta; onPress: () => void; angosto?: boolean; soloEscudo?: boolean; chip?: boolean }) {
   const activa = estado.activa;
   const simple = useInterfaz() === 'simple';
+  // En los chips del profesional: un chip más, con el escudo; puesta, se pinta del color de la ruta.
+  if (chip) {
+    return (
+      <button
+        type="button"
+        onClick={onPress}
+        aria-pressed={!!activa}
+        title={activa ? `${estado.tramos} tramos en ${tituloProvincia(activa.provincia)}` : 'La traza de la RN11 en Chaco'}
+        className="chip-pro chip-ruta relative flex h-11 shrink-0 items-center gap-2 rounded-full pl-2.5 pr-4 text-[15px] font-semibold"
+        data-activo={activa ? true : undefined}
+        style={activa ? ({ '--escudo-fondo': 'var(--vial-fuerte)', '--escudo-tinta': '#fff' } as React.CSSProperties) : undefined}
+      >
+        <EscudoRuta numero={activa?.numero ?? '11'} className={`h-7 w-auto ${estado.cargando ? 'animate-pulse' : ''}`} />
+        <span className="whitespace-nowrap">{estado.cargando ? 'Cargando…' : activa ? `Ocultar RN${activa.numero}` : 'Ver RN11'}</span>
+      </button>
+    );
+  }
   if (soloEscudo) {
     return (
       <button
@@ -1010,6 +1177,45 @@ function ContadorCapas({ visor }: { visor: Visor }) {
 
 // Modo simple: "Referencias" abre qué significa cada color de lo que se está viendo (la leyenda).
 // `compacto`: en el celular, más chico y se abre hacia abajo (va en la fila de arriba).
+// Escritorio del simple: las referencias, abiertas desde la pastilla "Ajustes". Un panel abajo a la izquierda,
+// sobre la escala (no choca con el panel de resultados, que va a la derecha); Escape o la cruz lo cierran y el foco vuelve a "Ajustes".
+function PanelReferencias({ visor, abierto, onCerrar }: { visor: Visor; abierto: boolean; onCerrar: () => void }) {
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!abierto) return;
+    requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>('button')?.focus());
+    const alPresionar = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || hayDialogoModal()) return;
+      e.stopImmediatePropagation();
+      onCerrar();
+      document.querySelector<HTMLElement>('[aria-label="Ajustes"]')?.focus();
+    };
+    window.addEventListener('keydown', alPresionar, true);
+    return () => window.removeEventListener('keydown', alPresionar, true);
+  }, [abierto, onCerrar]);
+  return (
+    <AnimatePresence>
+      {abierto && (
+        <motion.section
+          ref={panel}
+          aria-label="Referencias: qué significa cada color"
+          className="panel desplazable pointer-events-auto absolute bottom-[88px] left-4 z-20 max-h-[calc(100%-190px)] w-[380px] overflow-y-auto shadow-[var(--sombra-alta)]"
+          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 10, scale: 0.98 }}
+          transition={RESORTE_PANEL}
+        >
+          <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--linea)] bg-[var(--superficie)] py-3 pl-5 pr-2">
+            <h2 className="text-[20px] font-bold tracking-[-0.02em]">Referencias</h2>
+            <button type="button" onClick={() => { onCerrar(); document.querySelector<HTMLElement>('[aria-label="Ajustes"]')?.focus(); }} aria-label="Cerrar referencias" className="grid size-11 place-items-center rounded-xl hover:bg-[var(--superficie-2)]"><X size={20} weight="bold" /></button>
+          </header>
+          <LeyendaGeneral visor={visor} />
+        </motion.section>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function BotonReferencias({ visor, compacto }: { visor: Visor; compacto?: boolean }) {
   const [abierto, setAbierto] = useState(false);
   const boton = useRef<HTMLButtonElement>(null);
@@ -1088,4 +1294,11 @@ function resumirError(error: unknown) {
   const texto = (error as Error).message ?? String(error);
   const excepcion = texto.match(/<ows:ExceptionText>([\s\S]*?)<\/ows:ExceptionText>/)?.[1];
   return (excepcion ?? texto).slice(0, 220);
+}
+
+// Lo de adentro de un panel que entra y sale animado: mientras se va, ya no recibe clics (si no, el primer clic
+// en el mapa después de cerrarlo, por ejemplo el primer vértice de una medición, caía en el panel que se iba).
+function Tocable({ children }: { children: React.ReactNode }) {
+  const presente = useIsPresent();
+  return <div className={`${presente ? 'pointer-events-auto' : 'pointer-events-none'} flex min-h-0 flex-col`}>{children}</div>;
 }

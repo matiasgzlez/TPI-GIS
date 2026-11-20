@@ -9,7 +9,7 @@ import { Switch } from '@heroui/react';
 import { ArrowDown, Eye, FilePdf, MapTrifold, MagnifyingGlassMinus, MagnifyingGlassPlus, Printer, X } from '@phosphor-icons/react';
 import { capasDerecha, capasVisibles, cargarLeyenda, type Visor } from '../visor';
 import { EXTENSION_CHACO, URL_WFS, WORKSPACE, tituloDeCapa } from '../config';
-import { capaSimple, useInterfaz } from '../interfaz';
+import { capaSimple, destinoDeFoco, useInterfaz } from '../interfaz';
 import { RESORTE_PANEL } from '../movimiento';
 import EscudoRuta from '../componentes/EscudoRuta';
 import { dibujarMapa, encuadreActual, escalaParaEncuadre, escalaVecina, ESCALA_MAS_CERCA, ESCALA_MAS_LEJOS, type MapaImpreso } from './mapaImpreso';
@@ -162,12 +162,13 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
   useEffect(() => {
     if (presente) return;
     const boton = [...document.querySelectorAll<HTMLElement>('[aria-label="Imprimir el mapa"], [aria-label="Exportar a PDF"]')].find(el => el.getClientRects().length > 0);
-    requestAnimationFrame(() => boton?.focus());
+    requestAnimationFrame(() => destinoDeFoco(boton)?.focus());
   }, [presente]);
   useEffect(() => {
     if (!presente) return;
     campoTitulo.current?.focus();
-    campoTitulo.current?.select();
+    // En el simple el título no se selecciona entero (se veía todo resaltado en naranja al abrir).
+    if (!simple) campoTitulo.current?.select();
     const alPresionar = (e: KeyboardEvent) => {
       if (!raiz.current) return;
       if (e.key === 'Escape') { e.stopPropagation(); onCerrar(); return; }
@@ -182,7 +183,7 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
     };
     window.addEventListener('keydown', alPresionar, true);
     return () => window.removeEventListener('keydown', alPresionar, true);
-  }, [onCerrar, presente]);
+  }, [onCerrar, presente, simple]);
 
   // Encuadre y escala: la escala redonda con la que entra el encuadre, más los saltos pedidos.
   const marco = useMemo(() => marcoMapa(orientacion, mostrar.grilla, mostrar.leyenda), [orientacion, mostrar.grilla, mostrar.leyenda]);
@@ -353,7 +354,7 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
     >
       <div className="absolute inset-0 bg-[color-mix(in_srgb,#0b0d0f_52%,transparent)] backdrop-blur-[10px]" onClick={onCerrar} />
       <motion.div
-        className="relative grid h-[min(940px,calc(100%-48px))] w-[min(1500px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_392px] overflow-hidden rounded-[28px] bg-[var(--superficie)] shadow-[0_40px_120px_-20px_rgba(0,0,0,.55),0_0_0_1px_color-mix(in_srgb,var(--tinta)_8%,transparent)]"
+        className={`imprimir${simple ? ' imprimir-simple superficie-notch dark' : ''} relative grid h-[min(940px,calc(100%-48px))] w-[min(1500px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_392px] overflow-hidden rounded-[28px] bg-[var(--superficie)] shadow-[0_40px_120px_-20px_rgba(0,0,0,.55),0_0_0_1px_color-mix(in_srgb,var(--tinta)_8%,transparent)]`}
         initial={{ opacity: 0, y: 28, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 16, scale: 0.98 }}
@@ -361,7 +362,7 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
       >
         {/* La mesa: la hoja sobre un fondo punteado, con lo esencial de la hoja arriba a la izquierda. */}
         <div
-          className="relative flex min-h-0 flex-col bg-[var(--superficie-2)]"
+          className="imprimir-mesa relative flex min-h-0 flex-col bg-[var(--superficie-2)]"
           style={{ backgroundImage: 'radial-gradient(color-mix(in srgb, var(--tinta) 10%, transparent) 1px, transparent 1.4px)', backgroundSize: '22px 22px' }}
         >
           <div className="flex shrink-0 items-center gap-2 px-6 pt-5 text-[13px] font-medium text-[var(--tinta-2)]">
@@ -473,7 +474,7 @@ export default function Imprimir({ visor, contenido, ruta, panelAbierto, autores
               ref={botonDescargar}
               onClick={descargar}
               aria-disabled={sinDescarga}
-              className="group flex h-14 w-full items-center justify-between gap-3 rounded-2xl bg-[var(--vial-fuerte)] pl-5 pr-2 text-white transition-[transform,opacity] duration-200 ease-[var(--ios)] aria-[disabled=false]:hover:scale-[1.01] aria-[disabled=false]:active:scale-[0.99] aria-disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2"
+              className="boton-descargar group flex h-14 w-full items-center justify-between gap-3 rounded-2xl bg-[var(--vial-fuerte)] pl-5 pr-2 text-white transition-[transform,opacity] duration-200 ease-[var(--ios)] aria-[disabled=false]:hover:scale-[1.01] aria-[disabled=false]:active:scale-[0.99] aria-disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2"
             >
               <span className="text-left">
                 <span className="block text-[16px] font-semibold leading-tight">{t.descargar}</span>

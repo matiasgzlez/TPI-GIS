@@ -3,7 +3,9 @@ import { motion } from 'motion/react';
 import { RESORTE_PANEL } from '../../movimiento';
 
 // Guía de primeros pasos del modo simple: tres burbujas que iluminan dónde tocar. Aparece la primera vez
-// y se repite desde el botón de ayuda. Cada paso apunta a un elemento con data-guia="…".
+// y se repite desde Configuración → Manual (en el celular, desde el botón de ayuda). Cada paso apunta a un elemento con data-guia="…".
+// En el escritorio la puerta a los temas es la pastilla "Capas" del borde izquierdo (en el celular, el botón de abajo).
+const TEXTO_CAPAS = 'Pasá el cursor por «Capas», en el borde izquierdo, y elegí un tema, como Agua o Escuelas.';
 const PASOS = [
   { destino: 'buscar', titulo: 'Buscá lo que quieras', texto: 'Escribí un pueblo, "escuelas" o una pregunta como "¿cuánta gente vive cerca de la ruta 11?".' },
   { destino: 'temas', titulo: 'Elegí qué ver', texto: 'Abrí «¿Qué querés ver?» y elegí un tema, como Agua o Escuelas.' },
@@ -38,7 +40,7 @@ export default function Guia({ onTerminar }: { onTerminar: () => void }) {
     const previo = document.activeElement as HTMLElement | null;
     return () => {
       const destino = previo && previo !== document.body && previo.isConnected ? previo
-        : document.querySelector<HTMLElement>('[aria-label="Ayuda: cómo se usa"]') ?? document.querySelector<HTMLElement>('[data-guia="buscar"] input');
+        : [...document.querySelectorAll<HTMLElement>('[aria-label="Ayuda: cómo se usa"], [aria-label="Configuración y ayuda"], [aria-label="Ajustes"]')].find(el => el.getClientRects().length > 0) ?? document.querySelector<HTMLElement>('[data-guia="buscar"] input');
       requestAnimationFrame(() => destino?.focus());
     };
   }, []);
@@ -123,7 +125,7 @@ export default function Guia({ onTerminar }: { onTerminar: () => void }) {
       >
         <p className="text-[13px] font-semibold text-[var(--vial-texto)]">Paso {paso + 1} de {PASOS.length}</p>
         <h2 id="guia-titulo" className="mt-1 text-[22px] font-semibold leading-tight tracking-[-0.02em]">{actual.titulo}</h2>
-        <p className="mt-2 text-[16px] leading-snug text-[var(--tinta-2)]">{actual.texto}</p>
+        <p className="mt-2 text-[16px] leading-snug text-[var(--tinta-2)]">{actual.destino === 'temas' && document.querySelector('[data-guia="temas"][aria-label="Capas"]') ? TEXTO_CAPAS : actual.texto}</p>
         <div className="mt-4 flex items-center gap-2">
           <div className="flex flex-1 gap-1.5" aria-hidden="true">
             {PASOS.map((_, i) => <span key={i} className={`h-2 rounded-full transition-all duration-300 ${i === paso ? 'w-6 bg-[var(--tinta)]' : 'w-2 bg-[var(--superficie-3)]'}`} />)}

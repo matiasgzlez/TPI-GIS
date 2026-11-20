@@ -51,7 +51,8 @@ export interface Medicion {
 }
 
 export interface Avisos {
-  consultando: (origen: Consulta['origen']) => void;
+  // `zona`: lo que se consultó (el punto o el rectángulo, como extensión), para que la isla del simple no lo tape.
+  consultando: (origen: Consulta['origen'], zona?: number[]) => void;
   consulta: (consulta: Consulta) => void;
   error: (mensaje: string) => void;
   medicion: (medicion: Medicion | null) => void;
@@ -67,7 +68,7 @@ export function activarHerramienta(visor: Visor, modo: Modo, avisos: Avisos): ()
 
   if (modo === 'punto') {
     const alHacerClic = (e: MapBrowserEvent) => {
-      avisos.consultando('punto');
+      avisos.consultando('punto', [...e.coordinate, ...e.coordinate]);
       consultarPunto(visor, e.coordinate).then(avisos.consulta, e => avisos.error(String(e)));
     };
     mapa.on('singleclick', alHacerClic);
@@ -77,7 +78,7 @@ export function activarHerramienta(visor: Visor, modo: Modo, avisos: Avisos): ()
   if (modo === 'rectangulo') {
     const caja = new DragBox({ condition: () => true, className: 'caja-consulta' });
     caja.on('boxend', () => {
-      avisos.consultando('rectangulo');
+      avisos.consultando('rectangulo', caja.getGeometry().getExtent());
       consultarRectangulo(visor, caja.getGeometry().getExtent()).then(avisos.consulta, e => avisos.error(String(e)));
     });
     mapa.addInteraction(caja);

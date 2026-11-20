@@ -12,6 +12,54 @@ export const BASE_RENDIMIENTO = { fcp: 180, lcp: 1052, jsMover: 23, jsKB: 320 };
 // Resistencia: punto fijo para consultas, mediciones y altas.
 const RESISTENCIA = [-58.986, -27.452];
 
+// "Capas" (modo simple, escritorio) se abre con el cursor encima, como el menú de antiwebslop.com.
+// "Ajustes" (escritorio del simple): mientras hay resultados o una obra, su lugar lo ocupa el notch de
+// resultados; se cierran primero (como lo haría la persona) y se espera a que vuelva la pastilla.
+async function abrirAjustes(p) {
+  const cerrar = p.locator('.notch-resultados').getByRole('button', { name: /Cerrar resultados|Cancelar la obra/ });
+  if (await cerrar.count()) { await cerrar.first().click(); await p.waitForSelector('[aria-label="Ajustes"]', { timeout: 5000 }); }
+  await p.hover('[aria-label="Ajustes"]'); await p.waitForSelector('.notch[data-abierta] #ajustes-simple');
+}
+
+// Configuración: el engranaje (pro y celular) o, en el escritorio del simple, la pastilla "Ajustes" → Manual.
+async function abrirConfiguracion(p) {
+  const engranaje = p.getByRole('button', { name: 'Configuración y ayuda' });
+  if (await engranaje.count()) return engranaje.first().click();
+  await abrirAjustes(p);
+  await p.locator('#ajustes-simple').getByRole('button', { name: 'Manual' }).click();
+}
+
+// Referencias: el botón de abajo (celular) o, en el escritorio del simple, la pastilla "Ajustes" → Referencias.
+async function abrirReferencias(p) {
+  const boton = p.locator('button[title^="Referencias"]');
+  if (await boton.count() && await boton.first().isVisible()) return boton.first().click();
+  await abrirAjustes(p);
+  await p.locator('#ajustes-simple').getByRole('button', { name: 'Referencias' }).click();
+  await p.mouse.move(700, 450);
+}
+
+// Un botón de las herramientas: a la vista (pro, celular) o, en el escritorio del simple, adentro de la
+// pastilla "Herramientas" del borde de abajo (se abre pasando el cursor).
+async function tocarHerramienta(p, nombre) {
+  const notch = p.locator('#herramientas-simple');
+  if (!(await notch.count())) return p.getByRole('button', { name: nombre, exact: true }).first().click();
+  await p.hover('[aria-label="Herramientas"]'); await p.waitForSelector('.notch[data-abierta] #herramientas-simple');
+  await notch.getByRole('button', { name: nombre, exact: true }).click();
+  await p.mouse.move(700, 300);
+}
+
+async function abrirCapas(p) {
+  await p.locator('[data-guia="temas"]').hover();
+  await p.waitForSelector('.notch[data-abierta]');
+}
+// La RN11: en el profesional, el botón de arriba; en el simple (sin botón por ahora), desde el buscador.
+async function verRuta11(p) {
+  const boton = p.getByRole('button', { name: /^Ver RN11|^Ver la ruta 11/ });
+  if (await boton.count()) return boton.first().click();
+  await p.locator('[data-guia="buscar"] input').click();
+  await p.getByRole('option', { name: /Ver la ruta 11/ }).first().click();
+}
+
 const etiqueta = c => `${c.modo ?? 'bienvenida'}-${c.tema}-${c.w}${c.conTablero ? '-tablero' : ''}`;
 
 function nuevoInforme(prueba, combo) {
@@ -88,7 +136,7 @@ export function vista(combo, entorno) {
 // --- Tablero de la RN11: números de referencia y axe ---
 export function tablero(combo, entorno) {
   return envolver('tablero', combo, async ({ p, anotar, informe }) => {
-    await p.locator('button[aria-pressed]').filter({ hasText: /ruta 11|RN11/ }).first().click();
+    await verRuta11(p);
     // Los números se animan al aparecer: se espera a que estén todos (o a que se termine el tiempo).
     const todos = [REFERENCIA_RN11.km, ...REFERENCIA_RN11.hasta10, ...REFERENCIA_RN11.de10a20];
     await p.waitForFunction(ns => ns.every(n => document.body.innerText.includes(n)), todos, { timeout: 30000 }).catch(() => {});
@@ -126,9 +174,9 @@ export function consignas(combo, entorno) {
     anotar('paneo arrastrando', Math.hypot(d.c[0] - c.c[0], d.c[1] - c.c[1]) > 0);
 
     // Leyenda.
-    if (modo === 'simple') await p.locator('button[title^="Referencias"]').first().click();
-    // En pro, con el inspector vacío y poco ancho (1366), el inspector se pliega a un botón "Leyenda".
-    else await p.getByRole('radio', { name: /Leyenda/ }).or(p.getByRole('button', { name: /^Leyenda$/ })).first().click();
+    if (modo === 'simple') await abrirReferencias(p);
+    // En pro, "Leyenda" del riel abre el cajón con la leyenda.
+    else await p.getByRole('button', { name: /^Leyenda$/ }).first().click();
     const imagenesLeyenda = () => [...document.querySelectorAll('section[aria-label^="Referencias"] img, section[aria-label^="Leyenda"] img')]
       .filter(i => i.complete && i.naturalWidth > 0 && i.getBoundingClientRect().width > 0).length;
     await p.waitForFunction(imagenesLeyenda, null, { timeout: 15000 }).catch(() => {});
@@ -136,14 +184,14 @@ export function consignas(combo, entorno) {
     anotar('leyenda con imágenes', leyendas > 0, `${leyendas} imágenes`);
     await capturar(p, informe, entorno.salida, 'leyenda');
     if (modo === 'simple') { await p.keyboard.press('Escape'); await esperarQuietud(p); }
-    else await p.getByRole('radio', { name: /Información/ }).first().click();
+    else await p.getByRole('button', { name: /^Leyenda$/ }).first().click();
 
     // Prender y apagar capas.
     const capas = () => p.evaluate(() => window.__visor().visibles.size);
     const n0 = await capas();
     if (modo === 'simple') {
-      await p.getByRole('button', { name: '¿Qué querés ver?', exact: true }).click();
-      await p.getByRole('button', { name: /^Escuelas, salud/ }).first().click();
+      await abrirCapas(p);
+      await p.getByRole('button', { name: /^Escuelas y hospitales/ }).first().click();
       const tarjeta = p.locator('#temas-simple button[aria-pressed]').first();
       await tarjeta.waitFor(); await tarjeta.click();
     } else {
@@ -235,22 +283,26 @@ export function teclado(combo, entorno) {
 
     if (combo.modo === 'simple') {
       // Referencias: Escape la cierra y devuelve el foco.
-      await p.locator('button[title^="Referencias"]').first().click();
+      await abrirReferencias(p);
       await p.waitForSelector('section[aria-label^="Referencias"]');
       await p.keyboard.press('Escape');
       await p.waitForSelector('section[aria-label^="Referencias"]', { state: 'detached', timeout: 3000 }).catch(() => {});
       anotar('Escape cierra Referencias', !(await p.$('section[aria-label^="Referencias"]')));
-      anotar('el foco vuelve a Referencias', /Referencias/.test(await foco(p)), await foco(p));
+      anotar('el foco vuelve a Referencias (o a "Ajustes")', /Referencias|^Ajustes$/.test(await foco(p)), await foco(p));
 
-      // Guía con una respuesta y Referencias abiertas detrás.
+      // Guía con Referencias abiertas detrás (en el escritorio del simple, la respuesta se cierra para llegar a
+      // Ajustes: su notch la ocupa mientras hay resultados).
       await centrar(p, ...RESISTENCIA, 11);
       await p.keyboard.press('2');
       const [x, y] = await pixel(p, ...RESISTENCIA);
       await p.mouse.click(x, y); await esperarResultados(p).catch(() => {});
       // Sin "1": elegir Mover cierra la respuesta a propósito.
-      await p.locator('button[title^="Referencias"]').first().click();
+      await abrirReferencias(p);
       await p.waitForSelector('section[aria-label^="Referencias"]');
-      await p.getByRole('button', { name: 'Ayuda: cómo se usa' }).click();
+      // La guía se vuelve a ver desde Configuración → Manual (ya no hay botón de ayuda arriba).
+      // En el escritorio del simple, la guía está en la pastilla "Ajustes".
+      await abrirAjustes(p);
+      await p.getByRole('button', { name: 'Ver la guía' }).click();
       await p.waitForSelector('#guia-titulo');
       await esperarQuietud(p);
       anotar('al abrir la guía, el foco está adentro', await enDialogo(), await foco(p));
@@ -263,9 +315,11 @@ export function teclado(combo, entorno) {
       await p.keyboard.press('Escape');
       await p.waitForSelector('#guia-titulo', { state: 'detached', timeout: 3000 }).catch(() => {});
       anotar('Escape cierra la guía', !(await p.$('#guia-titulo')));
-      anotar('lo de atrás sigue abierto (respuesta y Referencias)', (await hayResultados(p)) && !!(await p.$('section[aria-label^="Referencias"]')));
+      // En el escritorio del simple la respuesta se cerró para llegar a Ajustes (su notch la ocupa): queda Referencias.
+      const sinRespuestaDetras = (await p.locator('.ajustes-lugar').count()) > 0;
+      anotar('lo de atrás sigue abierto (respuesta y Referencias)', (sinRespuestaDetras || (await hayResultados(p))) && !!(await p.$('section[aria-label^="Referencias"]')));
       await esperarFoco(p);
-      anotar('el foco vuelve a "Ayuda: cómo se usa"', (await foco(p)) === 'Ayuda: cómo se usa', await foco(p));
+      anotar('el foco vuelve a "Ajustes"', (await foco(p)) === 'Ajustes', await foco(p));
       await p.keyboard.press('Escape'); await esperarQuietud(p);
     }
 
@@ -276,7 +330,7 @@ export function teclado(combo, entorno) {
       const [x, y] = await pixel(p, ...RESISTENCIA);
       await p.mouse.click(x, y); await esperarResultados(p).catch(() => {});
     }
-    await p.getByRole('button', { name: 'Configuración y ayuda' }).first().click();
+    await abrirConfiguracion(p);
     await p.waitForSelector('[role=dialog][aria-label="Configuración y ayuda"]');
     await esperarQuietud(p);
     await p.keyboard.press('4'); await p.keyboard.press('/'); await p.keyboard.type('xy'); await p.keyboard.press('Meta+k');
@@ -301,9 +355,11 @@ export function teclado(combo, entorno) {
     await capturar(p, informe, entorno.salida, 'configuracion');
     await p.keyboard.press('Escape');
     await p.waitForSelector('[role=dialog][aria-label="Configuración y ayuda"]', { state: 'detached', timeout: 3000 }).catch(() => {});
-    anotar('Escape cierra Configuración y deja la respuesta', !(await p.$('[role=dialog][aria-label="Configuración y ayuda"]')) && (await hayResultados(p)));
+    // En el escritorio del simple, Configuración se abre desde Ajustes y eso cierra la respuesta (su notch la ocupa).
+    const respuestaCerradaAdrede = (await p.locator('.ajustes-lugar').count()) > 0;
+    anotar('Escape cierra Configuración y deja la respuesta', !(await p.$('[role=dialog][aria-label="Configuración y ayuda"]')) && (respuestaCerradaAdrede || (await hayResultados(p))));
     await esperarFoco(p);
-    anotar('el foco vuelve al engranaje', (await foco(p)) === 'Configuración y ayuda', await foco(p));
+    anotar('el foco vuelve al engranaje (o a "Ajustes")', /^(Configuración y ayuda|Ajustes)$/.test(await foco(p)), await foco(p));
   }, entorno, combo);
 }
 
@@ -366,7 +422,7 @@ export function exportar(combo, entorno) {
   return envolver('exportar', combo, async ({ p, anotar, informe }) => {
     const conTablero = combo.conTablero;
     if (conTablero) {
-      await p.locator('button[aria-pressed]').filter({ hasText: /ruta 11|RN11/ }).first().click();
+      await verRuta11(p);
       await p.waitForFunction(n => document.body.innerText.includes(n), REFERENCIA_RN11.hasta10[1], { timeout: 30000 });
       await esperarMapa(p);
     }
@@ -378,7 +434,7 @@ export function exportar(combo, entorno) {
     }, [lienzo, desde], { timeout: 45000 });
     const boton = combo.modo === 'simple' ? 'Imprimir el mapa' : 'Exportar a PDF';
     const t0 = Date.now();
-    await p.getByRole('button', { name: boton, exact: true }).first().click();
+    await tocarHerramienta(p, boton);
     // Cuadro a cuadro hasta que esté lista: nunca la descarga habilitada mientras la hoja se dibuja
     // (lápiz visible o color todavía recortado).
     const adelantos = [];
@@ -502,7 +558,7 @@ export function exportar(combo, entorno) {
     await p.waitForSelector('#imprimir-titulo', { state: 'detached', timeout: 3000 }).catch(() => {});
     anotar('Escape cierra la ventana', !(await p.$('#imprimir-titulo')));
     await esperarFoco(p);
-    anotar('el foco vuelve al botón que la abrió', (await foco(p)) === boton, await foco(p));
+    anotar('el foco vuelve al botón que la abrió (o a su pastilla)', [boton, 'Herramientas'].includes(await foco(p)), await foco(p));
   }, entorno, combo);
 }
 
@@ -633,6 +689,8 @@ export function calor(combo, entorno) {
       // Demasiados puntos (Otras edificaciones: 96.056) a escala país: sin mancha parcial, se pide acercarse.
       await p.evaluate(() => window.__visor().mapa.getView().setResolution(9000));
       await esperarMapa(p);
+      // En pro, Capas y Leyenda comparten el cajón del riel: se vuelve a Capas.
+      if (!(await p.locator('#cajon-pro section[aria-label="Capas"]').isVisible()) && await p.locator('nav[aria-label="Menú del visor"]').count()) await p.getByRole('button', { name: 'Capas', exact: true }).click();
       await p.getByRole('button', { name: /^Edificaciones/ }).first().click().catch(() => {});
       await p.locator('label').filter({ hasText: /^Otras edificaciones/ }).first().click({ timeout: 5000 }).catch(() => {});
       const otras = p.getByRole('radiogroup', { name: /Ver Otras edificaciones como/ });
@@ -650,19 +708,23 @@ export function calor(combo, entorno) {
       const f = await estado('localidades');
       anotar('Puntos: vuelve a dibujarse con el WMS', !f.activo && f.enWms && f.visible);
     } else {
-      await p.getByRole('button', { name: '¿Qué querés ver?', exact: true }).click();
-      const tarjeta = p.getByRole('button', { name: /^¿Dónde vive la gente/ });
+      // Dónde vive la gente: Pueblos y ciudades → "Ver como manchas" (localidades está prendida de entrada).
+      await abrirCapas(p);
+      await p.getByRole('button', { name: /^Pueblos y ciudades/ }).first().click();
+      const pueblos = p.locator('#temas-simple li').filter({ hasText: /^Pueblos y ciudades/ }).first();
+      const tarjeta = pueblos.getByRole('button', { name: /Ver como (manchas|puntos)/ });
       const antes = await estado('localidades');
       await tarjeta.click();
       await conPuntos('localidades'); await esperarMapa(p);
       const e = await estado('localidades');
-      anotar('"¿Dónde vive la gente?" muestra la mancha de población', e.activo && e.puntos > 0 && (await tarjeta.getAttribute('aria-pressed')) === 'true', `${e.puntos} localidades`);
+      anotar('"Ver como manchas" en Pueblos y ciudades muestra la mancha de población', e.activo && e.puntos > 0 && (await tarjeta.getAttribute('aria-pressed')) === 'true', `${e.puntos} localidades`);
       await capturar(p, informe, entorno.salida, 'donde-vive');
       await tarjeta.click(); await esperarMapa(p);
       const f = await estado('localidades');
-      anotar('al tocarla de nuevo vuelve a como estaba', !f.activo && f.visible === antes.visible && f.enWms === antes.enWms);
+      anotar('al tocarlo de nuevo vuelve a como estaba', !f.activo && f.visible === antes.visible && f.enWms === antes.enWms);
+      await p.getByRole('button', { name: /^Volver|Todos los temas|Atrás/ }).first().click();
       // Densidad: escuelas como manchas.
-      await p.getByRole('button', { name: /^Escuelas, salud y más/ }).click();
+      await p.getByRole('button', { name: /^Escuelas y hospitales/ }).click();
       const escuelas = p.locator('#temas-simple li').filter({ hasText: /^Escuelas/ }).first();
       await escuelas.getByRole('button').first().click();
       await escuelas.getByRole('button', { name: /Ver como manchas/ }).click();
@@ -802,7 +864,7 @@ export function tabla(combo, entorno) {
     await p.keyboard.press('t');
     anotar('T cierra la tabla', await p.waitForSelector(tablaSel, { state: 'detached', timeout: 4000 }).then(() => true).catch(() => false));
     await esperarFoco(p);
-    anotar('…y el foco vuelve al botón de la tabla', await p.evaluate(() => document.activeElement?.getAttribute('aria-label')) === 'Tabla de datos (T)');
+    anotar('…y el foco vuelve al botón de la tabla', await p.evaluate(() => document.activeElement?.getAttribute('aria-label')) === 'Tabla de atributos (T)');
   }, entorno, combo);
 }
 
@@ -812,7 +874,7 @@ export function tabla(combo, entorno) {
 export function distancia(combo, entorno) {
   return envolver('distancia', combo, async ({ p, anotar, informe }) => {
     const simple = combo.modo === 'simple';
-    await p.getByRole('button', { name: /Ver RN11|Ver la ruta 11/ }).first().click();
+    await verRuta11(p);
     await p.waitForFunction(() => /Localidades, de la más|Pueblos, del más/.test(document.body.innerText), null, { timeout: 30000 });
     await esperarMapa(p);
     await p.getByRole('button', { name: /Animar la distancia|Ver crecer la franja/ }).click();
@@ -958,7 +1020,7 @@ export function comparador(combo, entorno) {
     anotar('al cerrar, el mapa vuelve a las capas de antes', JSON.stringify(cerrado.visibles) === JSON.stringify(inicial.visibles) && !cerrado.derechaVisible, cerrado.visibles.join(','));
     anotar('sin recortes que queden en el mapa', await p.evaluate(() => ![...document.querySelectorAll('canvas')].some(c => c.style.clipPath)));
     // Con la animación de distancia (T5) abierta, la fila de los lados queda debajo de su panel.
-    await p.getByRole('button', { name: /Ver RN11|Ver la ruta 11/ }).first().click();
+    await verRuta11(p);
     await p.waitForFunction(() => /Localidades, de la más|Pueblos, del más/.test(document.body.innerText), null, { timeout: 30000 });
     await p.getByRole('button', { name: /Animar la distancia|Ver crecer la franja/ }).click();
     await p.locator('.crecer-franja').waitFor({ timeout: 5000 });
@@ -1080,7 +1142,7 @@ export function comparador(combo, entorno) {
       // Sin T5: tabla cerrada, cortina a la derecha, y se abre la tabla (el zoom sube con ella).
       await p.getByRole('button', { name: /Cerrar la animación/ }).first().click();
       await p.getByRole('button', { name: 'Achicar la tabla' }).click();
-      await p.getByRole('button', { name: /^Cerrar la tabla de datos/ }).first().click();
+      await p.getByRole('button', { name: /^Cerrar la tabla de (datos|atributos)/ }).first().click();
       await pausa(600);
       await manija().focus(); await p.keyboard.press('End'); await pausa(250);
       await p.keyboard.press('t');

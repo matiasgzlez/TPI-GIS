@@ -13,7 +13,7 @@ import { AnimatePresence, animate, motion, useIsPresent } from 'motion/react';
 import { ArrowsLeftRight, CaretDown, CaretLeft, CaretRight, Check, X } from '@phosphor-icons/react';
 import { GRUPOS } from '../config';
 import { JUEGOS_PROPIOS, PARES, juegoPorId, juegos, nombreLado, tituloJuego } from '../comparador';
-import { capaSimple, escribiendoEn, hayDialogoModal, useInterfaz } from '../interfaz';
+import { capaSimple, destinoDeFoco, escribiendoEn, hayDialogoModal, useInterfaz } from '../interfaz';
 import { escalaActual, movimientoReducido } from '../preferencias';
 import { RESORTE_PANEL } from '../movimiento';
 import { areaLibre, cambiarCalor, cambiarCapas, capasDerecha, capasVisibles, moverCorte, ponerCapas, ponerComparacion, suscribirCapas, type Visor } from '../visor';
@@ -126,7 +126,7 @@ export default function Comparador({ visor, conPanel, disposicion, onCerrar }: P
       // Si quien la abrió ya no está (se cambió de modo con la cortina abierta), al botón de comparar del modo actual.
       if (adentro) requestAnimationFrame(() => {
         const destinoFoco = origen?.isConnected ? origen : [...document.querySelectorAll<HTMLElement>('button[aria-label^="Comparar dos"]')].find(b => b.getClientRects().length > 0);
-        destinoFoco?.focus({ preventScroll: true });
+        destinoDeFoco(destinoFoco)?.focus({ preventScroll: true });
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -388,13 +388,13 @@ export default function Comparador({ visor, conPanel, disposicion, onCerrar }: P
 
   const botonIntercambiar = (
     <button type="button" onClick={intercambiar} aria-label={simple ? 'Dar vuelta los lados' : 'Intercambiar los lados'} title={simple ? 'Dar vuelta los lados' : 'Intercambiar los lados'}
-      className="panel grid size-10 shrink-0 place-items-center rounded-full text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2">
+      className={`panel boton-comparar grid size-10 shrink-0 place-items-center rounded-full text-[var(--tinta-2)]${simple ? ' superficie-notch dark' : ''} hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2`}>
       <ArrowsLeftRight size={18} weight="bold" />
     </button>
   );
 
   return createPortal(
-    <div ref={raiz} className="comparador" data-arrastrando={arrastrando || undefined}>
+    <div ref={raiz} className="comparador" data-simple={simple || undefined} data-arrastrando={arrastrando || undefined}>
       {/* La línea del corte, de arriba abajo (los paneles la tapan). */}
       <div aria-hidden="true" className="comparador-linea pointer-events-none absolute inset-y-0 z-[5]" style={{ left: x / e - 1 }} />
       {/* La línea también se arrastra (una franja angosta, solo en el lugar libre). */}
@@ -427,14 +427,14 @@ export default function Comparador({ visor, conPanel, disposicion, onCerrar }: P
       </div>
 
       {/* Arriba: qué hay de cada lado. */}
-      <div ref={fila} className={`absolute z-[12] flex items-center gap-2 ${filaOculta ? `opacity-0 pointer-events-none ${conFoco ? '' : 'invisible'}` : 'pointer-events-auto opacity-100 transition-opacity duration-200'}`} style={{ left: filaFinal.l / e, top: filaFinal.t / e }}>
+      <div ref={fila} className={`fila-comparar${simple ? ' superficie-notch dark' : ''} absolute z-[12] flex items-center gap-2 ${filaOculta ? `opacity-0 pointer-events-none ${conFoco ? '' : 'invisible'}` : 'pointer-events-auto opacity-100 transition-opacity duration-200'}`} style={{ left: filaFinal.l / e, top: filaFinal.t / e }}>
         <ChipLado refBoton={chipIzq} lado="izq" nombre={nombreIzq} abierto={abierto === 'izq'} onPress={() => alternarLista('izq')} simple={simple} />
         {/* Compacta: el hueco de la manija; el botón de intercambiar pasa después del nombre derecho. */}
         {compacta ? <span className="w-[52px] shrink-0" aria-hidden="true" /> : botonIntercambiar}
         <ChipLado refBoton={chipDer} lado="der" nombre={nombreDer} abierto={abierto === 'der'} onPress={() => alternarLista('der')} simple={simple} />
         {compacta && botonIntercambiar}
         <button type="button" onClick={onCerrar} aria-label={simple ? 'Dejar de comparar' : 'Cerrar el comparador (C)'} title={simple ? 'Dejar de comparar' : 'Cerrar el comparador (C)'}
-          className="panel grid size-10 shrink-0 place-items-center rounded-full text-[var(--tinta-2)] hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2">
+          className={`panel boton-comparar grid size-10 shrink-0 place-items-center rounded-full text-[var(--tinta-2)]${simple ? ' superficie-notch dark' : ''} hover:bg-[var(--superficie-2)] hover:text-[var(--tinta)] focus-visible:outline-2`}>
           <X size={17} weight="bold" />
         </button>
       </div>
@@ -477,14 +477,14 @@ function ChipLado({ refBoton, lado, nombre, abierto, onPress, simple }: { refBot
       aria-expanded={abierto}
       aria-haspopup="dialog"
       aria-label={`${lugar}: ${nombre.titulo}. ${simple ? 'Elegir qué ver de este lado' : 'Cambiar el juego de capas'}`}
-      className={`panel flex h-[52px] max-w-[260px] items-center gap-2.5 pl-3 pr-2.5 text-left transition-colors hover:bg-[var(--superficie-2)] focus-visible:outline-2 ${abierto ? 'ring-2 ring-[var(--tinta)]' : ''}`}
+      className={`panel chip-lado${simple ? ' superficie-notch dark' : ''} flex h-[52px] max-w-[260px] items-center gap-2.5 pl-3 pr-2.5 text-left transition-colors hover:bg-[var(--superficie-2)] focus-visible:outline-2 ${abierto ? 'ring-2 ring-[var(--tinta)]' : ''}`}
     >
       <span className="size-3 shrink-0 rounded-full" style={{ background: nombre.color }} aria-hidden="true" />
       <span className="flex min-w-0 flex-col">
         <span className="flex items-center gap-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--tinta-3)]">
           {lado === 'izq' && <CaretLeft size={10} weight="bold" aria-hidden="true" />}{lugar}{lado === 'der' && <CaretRight size={10} weight="bold" aria-hidden="true" />}
         </span>
-        <span className="truncate text-[15px] font-semibold leading-tight">{nombre.titulo}</span>
+        <span key={nombre.titulo} className="truncate text-[15px] font-semibold leading-tight">{nombre.titulo}</span>
       </span>
       <CaretDown size={14} weight="bold" className={`shrink-0 text-[var(--tinta-3)] transition-transform duration-200 ${abierto ? 'rotate-180' : ''}`} aria-hidden="true" />
     </button>
@@ -525,7 +525,12 @@ function Opciones({ lado, ancla, libre, obstaculos, fila, capas, antes, onJuego,
 
   // Al abrir, el foco va a lo elegido (o a lo primero); un clic afuera o el foco que se va cierran.
   useEffect(() => {
-    requestAnimationFrame(() => (panel.current?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? panel.current?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      const elegida = panel.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      (elegida ?? panel.current?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
+      // Lo elegido, a la vista (con la lista baja, quedaba cortado al pie).
+      elegida?.scrollIntoView({ block: 'nearest' });
+    });
     const afuera = (e: PointerEvent) => {
       if (!presenteRef.current) return;
       if (panel.current?.contains(e.target as Node) || ancla?.contains(e.target as Node)) return;
@@ -568,7 +573,7 @@ function Opciones({ lado, ancla, libre, obstaculos, fila, capas, antes, onJuego,
   // el primer panel que tenga debajo). Si no entra todo, la lista se desplaza.
   const e = escalaActual();
   const caja = ancla?.getBoundingClientRect();
-  const ANCHO = simple ? 360 : 380;
+  const ANCHO = simple ? 420 : 380;
   // Lo que mide el contenido entero (para no preferir un lugar más alto si debajo del nombre ya entra todo).
   const [contenido, setContenido] = useState(0);
   useLayoutEffect(() => { if (panel.current) setContenido(panel.current.scrollHeight); }, [aMedida]);
@@ -645,7 +650,7 @@ function Opciones({ lado, ancla, libre, obstaculos, fila, capas, antes, onJuego,
       exit={{ opacity: 0, y: -6, scale: 0.98 }}
       transition={RESORTE_PANEL}
       inert={!presente}
-      className={`panel desplazable absolute z-30 overflow-y-auto shadow-[var(--sombra-alta)] ${presente ? 'pointer-events-auto' : 'pointer-events-none'}`}
+      className={`panel opciones-comparar${simple ? ' superficie-notch dark' : ''} desplazable absolute z-30 overflow-y-auto shadow-[var(--sombra-alta)] ${presente ? 'pointer-events-auto' : 'pointer-events-none'}`}
       style={{ left: left / e, top: top / e, width: ANCHO, maxHeight: alto / e }}
     >
       <header className="border-b border-[var(--linea)] px-4 pb-3 pt-3.5">
@@ -668,11 +673,21 @@ function Opciones({ lado, ancla, libre, obstaculos, fila, capas, antes, onJuego,
             return (
               <button key={p.id} type="button" onClick={() => { onPar(p.izquierda, p.derecha); onCerrar(true); }}
                 className="flex h-11 items-center gap-2 rounded-xl px-2.5 text-left text-[14.5px] font-medium hover:bg-[var(--superficie-2)] focus-visible:outline-2">
-                <span className="size-2.5 rounded-full" style={{ background: izq.color }} aria-hidden="true" />
-                {tituloJuego(izq, interfaz)}
-                <span className="text-[var(--tinta-3)]">vs.</span>
-                <span className="size-2.5 rounded-full" style={{ background: der.color }} aria-hidden="true" />
-                {tituloJuego(der, interfaz)}
+                {simple ? (
+                  <>
+                    {/* Un círculo partido al medio con los dos colores: la cortina en chiquito. */}
+                    <span className="par-circulo" style={{ '--a': izq.color, '--b': der.color } as React.CSSProperties} aria-hidden="true" />
+                    <span className="min-w-0 truncate">{tituloJuego(izq, interfaz)} <span className="text-[var(--tinta-3)]">y</span> {tituloJuego(der, interfaz)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="size-2.5 rounded-full" style={{ background: izq.color }} aria-hidden="true" />
+                    {tituloJuego(izq, interfaz)}
+                    <span className="text-[var(--tinta-3)]">vs.</span>
+                    <span className="size-2.5 rounded-full" style={{ background: der.color }} aria-hidden="true" />
+                    {tituloJuego(der, interfaz)}
+                  </>
+                )}
               </button>
             );
           })}
@@ -798,7 +813,7 @@ const ultimas = new WeakMap<Element, { t: number; caja: Caja; previa?: Caja }>()
 function medirObstaculos(): Caja[] {
   const cajas: Caja[] = [];
   const ahora = performance.now();
-  document.querySelectorAll<HTMLElement>('.interfaz .panel, .interfaz .minimapa').forEach(el => {
+  document.querySelectorAll<HTMLElement>('.interfaz .panel, .interfaz .minimapa, .interfaz .acciones-pista').forEach(el => {
     if (el.closest('.comparador')) return;
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return;

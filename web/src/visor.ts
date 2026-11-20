@@ -11,7 +11,8 @@ import { get as proyeccion, getPointResolution, toLonLat, fromLonLat } from 'ol/
 import { createXYZ } from 'ol/tilegrid';
 import { getCenter } from 'ol/extent';
 import Feature from 'ol/Feature';
-import { MultiLineString, Point } from 'ol/geom';
+import { LineString, MultiLineString, MultiPoint, Point } from 'ol/geom';
+import type { Geometry } from 'ol/geom';
 import type { Coordinate } from 'ol/coordinate';
 import { Circle, Fill, Icon, RegularShape, Stroke, Style, Text } from 'ol/style';
 import { getRenderPixel, getVectorContext } from 'ol/render';
@@ -113,7 +114,43 @@ const estiloResaltado = () => [
   }),
 ];
 
+// El resaltado del escritorio del modo simple (lo que se apunta en "¿Qué hay acá?"): una línea como un trazo
+// de marcador, naranja y con puntas redondas, sobre un borde del color del papel (se despega de las rutas
+// naranjas del mapa) y un resplandor suave; un punto en cada punta para ver dónde empieza y termina. Al
+// aparecer la recorre una luz (cometa, en latir). Un lugar: punto naranja con aro claro y un halo.
+let focoSimple = false;
+export const usarFocoSimple = (visor: Visor, simple: boolean) => { if (focoSimple !== simple) { focoSimple = simple; visor.foco.changed(); } };
+const lineasDe = (g: Geometry | undefined): LineString[] =>
+  g instanceof LineString ? [g] : g instanceof MultiLineString ? g.getLineStrings() : [];
+const puntas = (f: import('ol/Feature').FeatureLike) => {
+  const lineas = lineasDe(f.getGeometry() as Geometry | undefined);
+  return lineas.length ? new MultiPoint(lineas.flatMap(l => [l.getFirstCoordinate(), l.getLastCoordinate()])) : undefined;
+};
+function estiloFocoGrande(feature: import('ol/Feature').FeatureLike) {
+  const t = tamanoMapa;
+  const redondo = { lineCap: 'round', lineJoin: 'round' } as const;
+  return [
+    new Style({
+      zIndex: 1,
+      stroke: new Stroke({ color: hacerTransparente(paleta.acento, 0.16), width: t(22), ...redondo }),
+      image: new Circle({ radius: t(22), fill: new Fill({ color: hacerTransparente(paleta.acento, 0.18) }) }),
+    }),
+    new Style({ zIndex: 2, stroke: new Stroke({ color: paleta.papel, width: t(9.5), ...redondo }), fill: new Fill({ color: hacerTransparente(paleta.acento, 0.1) }) }),
+    new Style({
+      zIndex: 3,
+      stroke: new Stroke({ color: paleta.acento, width: t(5), ...redondo }),
+      image: new Circle({ radius: t(8.5), fill: new Fill({ color: paleta.acento }), stroke: new Stroke({ color: paleta.papel, width: t(3.5) }) }),
+    }),
+    new Style({
+      zIndex: 4,
+      geometry: puntas,
+      image: new Circle({ radius: t(6), fill: new Fill({ color: paleta.papel }), stroke: new Stroke({ color: paleta.acento, width: t(3.5) }) }),
+    }),
+  ];
+}
+
 const estiloFoco = (feature: import('ol/Feature').FeatureLike, resolucion: number) => {
+  if (focoSimple && !feature.get('elegida')) return estiloFocoGrande(feature);
   const estilos = [
     new Style({
       stroke: new Stroke({ color: hacerTransparente(paleta.acento, 0.25), width: 14 }),
@@ -580,6 +617,7 @@ function latir(evento: RenderEvent, fuente: VectorSource, mapa: Map) {
   const suave = 1 - (1 - t) ** 3;
   const contexto = getVectorContext(evento);
   const color = hacerTransparente(paleta.acento, 0.55 * (1 - t));
+  if (focoSimple) { cometa(evento, entidades, contexto); mapa.render(); return; }
   for (const entidad of entidades) {
     const geometria = entidad.getGeometry();
     if (!geometria) continue;
@@ -589,6 +627,42 @@ function latir(evento: RenderEvent, fuente: VectorSource, mapa: Map) {
     contexto.drawGeometry(geometria);
   }
   mapa.render();
+}
+
+// En el simple, una luz recorre cada línea de punta a punta (1,6 s por vuelta, mientras dura el latido): una
+// raya corta y blanca con un brillo alrededor, que se mueve con el desfase del punteado. Los lugares, dos aros
+// que se abren uno detrás del otro.
+function cometa(evento: RenderEvent, entidades: import('ol/Feature').default[], contexto: ReturnType<typeof getVectorContext>) {
+  const resolucion = evento.frameState!.viewState.resolution;
+  const ahora = Date.now();
+  const largoCometa = tamanoMapa(70);
+  for (const entidad of entidades) {
+    const geometria = entidad.getGeometry() as Geometry | undefined;
+    if (!geometria) continue;
+    if (geometria.getType() === 'Point' || geometria.getType() === 'MultiPoint') {
+      for (const desfase of [0, 0.5]) {
+        const u = ((ahora + desfase * 1600) % 1600) / 1600;
+        const abre = 1 - (1 - u) ** 3;
+        contexto.setStyle(new Style({ image: new Circle({ radius: tamanoMapa(10 + abre * 30), stroke: new Stroke({ color: hacerTransparente(paleta.acento, 0.6 * (1 - u)), width: tamanoMapa(2.5) }) }) }));
+        contexto.drawGeometry(geometria);
+      }
+      continue;
+    }
+    for (const linea of lineasDe(geometria)) {
+      const largo = linea.getLength() / resolucion;
+      if (largo < tamanoMapa(24)) continue;
+      // Cuanto más larga la línea, más lenta la vuelta (velocidad pareja): entre 1,1 y 2,4 s.
+      const vuelta = Math.min(2400, Math.max(1100, largo * 4));
+      const u = (ahora % vuelta) / vuelta;
+      const avance = u < 0.5 ? 4 * u ** 3 : 1 - (-2 * u + 2) ** 3 / 2;
+      const desplazamiento = largoCometa - avance * (largo + largoCometa);
+      const punteado = [largoCometa, largo + largoCometa * 2];
+      contexto.setStyle(new Style({ stroke: new Stroke({ color: 'rgba(255,255,255,0.45)', width: tamanoMapa(9), lineCap: 'round', lineDash: punteado, lineDashOffset: desplazamiento }) }));
+      contexto.drawGeometry(linea);
+      contexto.setStyle(new Style({ stroke: new Stroke({ color: '#ffffff', width: tamanoMapa(2.5), lineCap: 'round', lineDash: punteado, lineDashOffset: desplazamiento }) }));
+      contexto.drawGeometry(linea);
+    }
+  }
 }
 
 // --- Capas prendidas ---
@@ -897,29 +971,38 @@ type Margenes = [number, number, number, number];
 const DISPOSICIONES: Record<'simple' | 'pro', { base: Margenes; conPanel: number }> = {
   // Simple: panel de temas a la izquierda (≈390 px), botones grandes abajo, resultados flotando a la derecha.
   simple: { base: [110, 100, 150, 410], conPanel: 450 },
-  // Pro: barra de arriba, barra lateral de capas, inspector fijo a la derecha y barra de estado abajo.
-  pro: { base: [96, 420, 80, 340], conPanel: 420 },
+  // Pro (como un mapa web): arriba el buscador y los chips, a la izquierda el riel (y su cajón, si está
+  // abierto), abajo la barra de estado y a la derecha el zoom. Lo consultado va debajo del buscador, a la
+  // izquierda: ver margenesMapa.
+  pro: { base: [80, 84, 64, 100], conPanel: 84 },
 };
 let disposicion: 'simple' | 'pro' = 'pro';
 let lateralPlegado = false;
-let inspectorPlegado = false;
 let altoTablaAbierta = 0;
-// `altoTabla`: la tabla de datos del profesional (T4) tapa el borde de abajo del mapa.
-export function ponerDisposicion(interfaz: 'simple' | 'pro', plegado = false, sinInspector = false, altoTabla = 0) {
+// `plegado`: el panel de la izquierda cerrado (en el profesional, el cajón del riel). `altoTabla`: la tabla
+// de datos del profesional (T4) tapa el borde de abajo del mapa.
+export function ponerDisposicion(interfaz: 'simple' | 'pro', plegado = false, altoTabla = 0) {
   disposicion = interfaz;
   lateralPlegado = plegado;
-  inspectorPlegado = sinInspector;
   altoTablaAbierta = altoTabla;
 }
+
+// Profesional: el riel (76 px), el cajón (380 px) y la columna de lo consultado (400 px + 16 de aire).
+const RIEL_PRO = 76;
+const CAJON_PRO = 380;
+const COLUMNA_PRO = 416;
 
 function margenesMapa(conPanel = false): Margenes {
   if (window.innerWidth < 1024 && conPanel) return [150, 20, Math.round(window.innerHeight * 0.5), 20];
   if (window.innerWidth < 768) return [150, 20, 190, 20];
   const escala = escalaActual();
   const { base, conPanel: derecha } = DISPOSICIONES[disposicion];
-  const margenDerecho = disposicion === 'pro' && inspectorPlegado ? 40 : base[1];
-  const abajo = disposicion === 'pro' && altoTablaAbierta ? base[2] + altoTablaAbierta : base[2];
-  const margenes: Margenes = [base[0], conPanel ? Math.max(margenDerecho, derecha) : margenDerecho, abajo, lateralPlegado ? 16 : base[3]];
+  if (disposicion === 'pro') {
+    const izquierda = RIEL_PRO + (lateralPlegado ? 0 : CAJON_PRO) + (conPanel ? COLUMNA_PRO : 0) + 24;
+    const abajo = base[2] + (altoTablaAbierta ? altoTablaAbierta + 12 : 0);
+    return ([base[0], base[1], abajo, izquierda] as Margenes).map(m => Math.round(m * escala)) as Margenes;
+  }
+  const margenes: Margenes = [base[0], conPanel ? Math.max(base[1], derecha) : base[1], base[2], lateralPlegado ? 16 : base[3]];
   return margenes.map(m => Math.round(m * escala)) as Margenes;
 }
 
@@ -1039,6 +1122,8 @@ export async function capasParaImprimir(visor: Visor, extension: number[]) {
   });
   for (const capa of visor.mapa.getLayers().getArray()) {
     if (!(capa instanceof VectorLayer) || capa instanceof Graticule || !capa.getVisible()) continue;
+    // Las luces de las capitales son de la noche en pantalla (su visibilidad la da el CSS): la hoja no las lleva.
+    if (capa === visor.lucesCapitales) continue;
     const estilo = capa.getStyleFunction();
     if (!estilo) continue;
     capas.push(conLado(new VectorLayer({

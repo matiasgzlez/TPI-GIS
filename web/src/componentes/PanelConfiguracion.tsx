@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Switch } from '@heroui/react';
 import { motion, useIsPresent } from 'motion/react';
-import { BookOpen, FilePdf, GearSix, Moon, Printer, Sun, X } from '@phosphor-icons/react';
+import { BookOpen, FilePdf, GearSix, Moon, Printer, Question, Sun, X } from '@phosphor-icons/react';
 import { HERRAMIENTAS, type Modo } from '../herramientas';
 import { RESORTE_PANEL } from '../movimiento';
 import type { Preferencias, Tamano } from '../preferencias';
@@ -16,6 +16,8 @@ interface Props {
   oscuro: boolean;
   onTema: (oscuro: boolean) => void;
   onCerrar: () => void;
+  // Modo simple: vuelve a mostrar la guía de primeros pasos (antes tenía un botón propio arriba).
+  onGuia?: () => void;
 }
 
 // Qué hace cada herramienta, con un ejemplo concreto. Es el manual del visor.
@@ -37,17 +39,20 @@ const TAMANOS: { valor: Tamano; etiqueta: string }[] = [
 type Seccion = 'ajustes' | 'manual';
 
 // Hoja lateral con los ajustes del visor y el manual de uso.
-export default function PanelConfiguracion({ preferencias, onCambiar, oscuro, onTema, onCerrar }: Props) {
+export default function PanelConfiguracion({ preferencias, onCambiar, oscuro, onTema, onCerrar, onGuia }: Props) {
   const simple = useInterfaz() === 'simple';
   const [seccion, setSeccion] = useState<Seccion>('ajustes');
+  // En el escritorio del simple, los temas se abren desde la pastilla "Capas": el manual la nombra así.
+  const [hayCapas] = useState(() => !!document.querySelector('[data-guia="temas"][aria-label="Capas"]'));
   const hoja = useRef<HTMLElement>(null);
   // Mientras sale (la animación dura ~0,5 s) ya no es modal: los atajos y el foco vuelven enseguida.
   const presente = useIsPresent();
   const previo = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
   const devolverFoco = () => {
     const p = previo.current;
-    const destino = p && p !== document.body && p.isConnected ? p
-      : [...document.querySelectorAll<HTMLElement>('[aria-label="Configuración y ayuda"]')].find(el => el.getClientRects().length > 0);
+    // Si se abrió desde la pastilla "Ajustes" (que ya se recogió y dejó su contenido inerte), vuelve a la pastilla.
+    const destino = p && p !== document.body && p.isConnected && !p.closest('[inert]') ? p
+      : [...document.querySelectorAll<HTMLElement>('[aria-label="Configuración y ayuda"], [aria-label="Ajustes"]')].find(el => el.getClientRects().length > 0);
     requestAnimationFrame(() => destino?.focus());
   };
   useEffect(() => { if (!presente) devolverFoco(); }, [presente]);
@@ -171,9 +176,18 @@ export default function PanelConfiguracion({ preferencias, onCambiar, oscuro, on
             <>
               {simple ? (
                 <>
+                  {onGuia && (
+                    <button
+                      type="button"
+                      onClick={onGuia}
+                      className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--tinta)] text-[15px] font-semibold text-[var(--superficie)] focus-visible:outline-2 focus-visible:outline-offset-2"
+                    >
+                      <Question size={19} weight="bold" /> Ver la guía de primeros pasos
+                    </button>
+                  )}
                   <Grupo titulo="Para empezar">
-                    <Ayuda icono={<EscudoRuta className="h-[22px] w-auto" />} titulo="Ver la ruta 11" texto="Te muestra la ruta, qué tan larga es y cuánta gente vive cerca." />
-                    <Ayuda icono={<IconoCapa size={20} />} titulo="¿Qué querés ver?" texto="Tocá un tema, como Agua o Escuelas, y después lo que quieras mostrar en el mapa." />
+                    <Ayuda icono={<EscudoRuta className="h-[22px] w-auto" />} titulo="Ver la ruta 11" texto="Escribí «ruta 11» en el buscador: te muestra la ruta, qué tan larga es y cuánta gente vive cerca." />
+                    <Ayuda icono={<IconoCapa size={20} />} titulo={hayCapas ? 'Capas' : '¿Qué querés ver?'} texto={hayCapas ? 'Pasá el cursor por «Capas», en el borde izquierdo: tocá un tema, como Agua o Escuelas, y después lo que quieras mostrar.' : 'Tocá un tema, como Agua o Escuelas, y después lo que quieras mostrar en el mapa.'} />
                     <Ayuda icono={<span className="text-[15px] font-semibold">?</span>} titulo="Buscar" texto="Escribí un pueblo, una cosa (escuelas, ríos) o una pregunta." />
                   </Grupo>
                   <Grupo titulo="Botones">
@@ -213,7 +227,7 @@ export default function PanelConfiguracion({ preferencias, onCambiar, oscuro, on
                   texto={simple
                     ? 'Arma una hoja con el mapa que estás viendo, qué significa cada color y la respuesta abierta. Se descarga para imprimirla.'
                     : 'Hoja A4 con la vista actual: título, grilla de coordenadas, norte, escala gráfica y numérica, leyenda, fuente y autores. Con una consulta o el tablero abiertos, suma páginas con cifras, gráfico y tabla.'}
-                  ejemplo={simple ? 'Tocá "Ver la ruta 11", después Imprimir y Descargar el mapa.' : 'Abrí el tablero de la RN11, apretá P y descargá: mapa más la tabla de localidades.'}
+                  ejemplo={simple ? 'Buscá "ruta 11", después tocá Imprimir y Descargar el mapa.' : 'Abrí el tablero de la RN11, apretá P y descargá: mapa más la tabla de localidades.'}
                   tecla="P"
                 />
               </Grupo>

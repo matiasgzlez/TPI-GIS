@@ -67,9 +67,9 @@ export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explic
   useEffect(() => onPagina?.(pagina), [pagina, onPagina]);
 
   // --- Transiciones: la hoja "se dibuja" ---
-  // La primera vez, al cambiar de página y al girar la hoja, la página no aparece de golpe: primero se
-  // traza en lápiz (la misma página en grises) con una línea que la recorre de arriba abajo, y detrás
-  // pasa una segunda línea, naranja, que la llena de color. Al cambiar de página la anterior sale como
+  // La primera vez, al cambiar de página y al girar la hoja, la página no aparece de golpe: se pinta a
+  // crayón, renglón por renglón (de izquierda a derecha y de arriba abajo), con el grano de la tiza, y al
+  // final la página nítida se funde encima (pintarConCrayon). Al cambiar de página la anterior sale como
   // una hoja que se da vuelta. Con "reducir movimiento" (del sistema o de Configuración), un fundido.
   const [alcance, animar] = useAnimate();
   const boceto = useRef<HTMLCanvasElement>(null);
@@ -201,28 +201,20 @@ export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explic
       onDibujada?.(null);
       // Al pasar de página, la nueva se empieza a dibujar cuando la anterior ya se dio vuelta.
       const demora = saliente ? 0.34 : 0;
-      // El boceto en lápiz: la misma página en grises, con más contraste.
-      const lapiz = boceto.current!;
-      lapiz.width = visible.width; lapiz.height = visible.height;
-      const b = lapiz.getContext('2d')!;
-      b.filter = 'grayscale(1) contrast(1.45) brightness(1.07)';
-      b.drawImage(visible, 0, 0);
-      // Arranca tapado (el color y el lápiz) y se descubre de arriba abajo.
+      // A crayón: la página aparece como si se la pintara con tiza, renglón por renglón, de izquierda a
+      // derecha y de arriba abajo (en el lienzo del boceto); al terminar, la página nítida se funde encima.
+      const tiza = boceto.current!;
       visible.style.clipPath = 'inset(0% 0% 100% 0%)';
-      lapiz.style.clipPath = 'inset(0% 0% 100% 0%)';
-      lapiz.style.opacity = '1';
-      const trazo = [0.65, 0, 0.35, 1] as const;
-      const relleno = [0.33, 1, 0.68, 1] as const;
-      const animacion = Promise.all([
-        animar(lapiz, { clipPath: ['inset(0% 0% 100% 0%)', 'inset(0% 0% 0% 0%)'] }, { duration: 0.75, ease: trazo, delay: demora }),
-        animar('[data-linea="lapiz"]', { top: ['0%', '100%'], opacity: [0, 1, 1, 0] }, { duration: 0.75, ease: trazo, delay: demora, times: [0, 0.08, 0.9, 1] }),
-        animar(visible, { clipPath: ['inset(0% 0% 100% 0%)', 'inset(0% 0% 0% 0%)'] }, { duration: 0.85, ease: relleno, delay: demora + 0.38 }),
-        animar('[data-linea="color"]', { top: ['0%', '100%'], opacity: [0, 1, 1, 0] }, { duration: 0.85, ease: relleno, delay: demora + 0.38, times: [0, 0.08, 0.9, 1] }),
-      ]);
+      tiza.style.opacity = '1';
+      const animacion = pintarConCrayon(tiza, visible, demora, () => !cancelado).then(async () => {
+        if (cancelado) return;
+        visible.style.clipPath = '';
+        await animar(visible, { opacity: [0, 1] }, { duration: 0.35, ease: 'easeOut' });
+      });
       dibujoEnCurso.current = animacion;
       animacion.then(() => {
         if (dibujoEnCurso.current === animacion) dibujoEnCurso.current = null;
-        lapiz.style.opacity = '0';
+        tiza.style.opacity = '0';
         visible.style.clipPath = '';
         lista();
       }).catch(() => { if (dibujoEnCurso.current === animacion) dibujoEnCurso.current = null; visible.style.clipPath = ''; lista(); });
@@ -272,7 +264,7 @@ export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explic
           transition={{ ...RESORTE_PANEL, rotateX: { type: 'spring', stiffness: 110, damping: 17 }, y: { type: 'spring', stiffness: 140, damping: 19 }, opacity: { duration: 0.35 } }}
         >
           <div ref={hoja} className="absolute inset-0">
-          {/* El boceto en lápiz (debajo del color mientras se dibuja) y las dos líneas de trazado. */}
+          {/* La hoja a crayón mientras se dibuja (debajo de la nítida, que se funde encima al final). */}
           <canvas ref={boceto} aria-hidden="true" className="absolute inset-0 size-full object-contain opacity-0" />
           <canvas
             ref={lienzo}
@@ -280,8 +272,6 @@ export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explic
             aria-label={`Vista previa de la página ${pagina} de ${total}`}
             className={`absolute inset-0 size-full object-contain transition-opacity duration-200 ${dibujada && Math.abs(proporcionDibujada - proporcion) < 0.01 ? 'opacity-100' : 'opacity-0'}`}
           />
-          <span data-linea="lapiz" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[#15171a]/55 opacity-0 shadow-[0_0_0_0.5px_rgba(21,23,26,.15)]" />
-          <span data-linea="color" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-[var(--vial)] opacity-0 shadow-[0_0_14px_3px_color-mix(in_srgb,var(--vial)_55%,transparent)]" />
           {(!dibujada || Math.abs(proporcionDibujada - proporcion) >= 0.01) && !error && <div className="absolute inset-0 animate-pulse bg-[#f3f4f1]" />}
           {/* Error: un aviso centrado sobre la hoja, con la salida a mano. */}
           {error && (
@@ -347,4 +337,112 @@ export default function VistaPrevia({ blob, ocupado, error, textoOcupado, explic
       )}
     </div>
   );
+}
+
+// Pinta `pagina` sobre `tiza` como con un crayón: una máscara de trazos granulados que avanza renglón por
+// renglón, de izquierda a derecha y de arriba abajo, con un leve vaivén (la mano). Cada trazo son muchas
+// rayitas finas de opacidad al azar, más densas en el centro del renglón. Tres cosas lo hacen crayón y no
+// pincel: (1) el poro del papel, una trama de huecos alargados que se resta a la máscara (el crayón no entra
+// en los valles del papel, así el trazo nunca queda lleno); (2) la cera, una capa grafito del mismo trazo que
+// se multiplica encima, así hasta lo blanco de la hoja (el título, la leyenda) se ve "pintado"; y (3) la
+// punta, un poco más cargada donde va la mano. Al terminar, la página nítida se funde encima. Dura ~1,8 s.
+function pintarConCrayon(tiza: HTMLCanvasElement, pagina: HTMLCanvasElement, demora: number, vivo: () => boolean): Promise<void> {
+  const W = pagina.width, H = pagina.height;
+  tiza.width = W; tiza.height = H;
+  const ctx = tiza.getContext('2d')!;
+  const nuevoLienzo = () => { const l = document.createElement('canvas'); l.width = W; l.height = H; return l; };
+  const mascara = nuevoLienzo();
+  const m = mascara.getContext('2d')!;
+  m.fillStyle = '#000';
+  const cera = nuevoLienzo();
+  const c = cera.getContext('2d')!;
+  let semilla = 11;
+  const azar = () => (semilla = (semilla * 16807) % 2147483647) / 2147483647;
+  // El poro del papel: una baldosa de huecos alargados en horizontal (la veta), a escala de la hoja.
+  const lado = 160;
+  const baldosa = document.createElement('canvas');
+  baldosa.width = lado; baldosa.height = lado;
+  const b = baldosa.getContext('2d')!;
+  const datos = b.createImageData(lado, lado);
+  const veta = Array.from({ length: lado }, () => azar());
+  for (let y = 0; y < lado; y++) {
+    for (let x = 0; x < lado; x++) {
+      const v = 0.55 * azar() + 0.45 * veta[(y + Math.floor(azar() * 2)) % lado];
+      datos.data[(y * lado + x) * 4 + 3] = v > 0.58 ? Math.min(255, ((v - 0.58) / 0.42) * 330) : 0;
+    }
+  }
+  b.putImageData(datos, 0, 0);
+  const poro = ctx.createPattern(baldosa, 'repeat')!;
+  poro.setTransform(new DOMMatrix().scale(Math.max(1, W / 1000)));
+  const filas = W >= H ? 9 : 12;
+  const alto = H / filas;
+  const grosor = alto * 1.5;
+  const total = filas * W;
+  const paso = Math.max(2, W / 300);
+  const duracion = 1800;
+  let hecho = 0;
+  let punta = { x: 0, y: 0 };
+  const pintarHasta = (hasta: number) => {
+    for (; hecho < hasta; hecho += paso) {
+      const fila = Math.min(filas - 1, Math.floor(hecho / W));
+      const x = hecho - fila * W;
+      const y = alto * (fila + 0.5) + Math.sin((x / W) * Math.PI * 2.5 + fila * 1.7) * alto * 0.1;
+      punta = { x, y };
+      for (let i = 0; i < 9; i++) {
+        // Más marcas en el centro del renglón que en los bordes (suma de dos azares: triangular), finas y
+        // estiradas a lo largo del trazo, de opacidad despareja y baja: las vetas del crayón.
+        const dy = (azar() + azar() - 1) * (grosor / 2);
+        const dx = (azar() - 0.5) * paso * 4;
+        const r = Math.max(1, grosor * (0.025 + azar() * 0.04));
+        m.globalAlpha = 0.1 + azar() * 0.32;
+        m.beginPath();
+        m.ellipse(x + dx, y + dy, r * 3.6, r * 0.6, -0.18 + (azar() - 0.5) * 0.2, 0, Math.PI * 2);
+        m.fill();
+      }
+    }
+  };
+  return new Promise(resolver => {
+    let inicio = 0;
+    const cuadro = (t: number) => {
+      if (!vivo()) return resolver();
+      if (!inicio) inicio = t + demora * 1000;
+      const u = Math.min(1, Math.max(0, (t - inicio) / duracion));
+      // Arranca y termina un poco más lento (la mano que se apoya y se levanta).
+      const e = -(Math.cos(Math.PI * u) - 1) / 2;
+      pintarHasta(e * total);
+      // El trazo con el poro del papel restado.
+      ctx.globalCompositeOperation = 'copy';
+      ctx.globalAlpha = 1;
+      ctx.drawImage(mascara, 0, 0);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = poro;
+      ctx.fillRect(0, 0, W, H);
+      // La cera: la misma forma, en grafito.
+      c.globalCompositeOperation = 'copy';
+      c.drawImage(tiza, 0, 0);
+      c.globalCompositeOperation = 'source-in';
+      c.fillStyle = '#3a3e46';
+      c.fillRect(0, 0, W, H);
+      // La página entra solo donde pasó el crayón y la cera se multiplica encima.
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.drawImage(pagina, 0, 0);
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalAlpha = 0.3;
+      ctx.drawImage(cera, 0, 0);
+      // La punta: donde va la mano, un poco más de cera.
+      if (u > 0 && u < 1) {
+        const g = ctx.createRadialGradient(punta.x, punta.y, 0, punta.x, punta.y, grosor * 0.6);
+        g.addColorStop(0, 'rgba(58,62,70,0.35)');
+        g.addColorStop(1, 'rgba(58,62,70,0)');
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = g;
+        ctx.fillRect(punta.x - grosor, punta.y - grosor, grosor * 2, grosor * 2);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      if (u < 1) requestAnimationFrame(cuadro); else resolver();
+    };
+    requestAnimationFrame(cuadro);
+  });
 }

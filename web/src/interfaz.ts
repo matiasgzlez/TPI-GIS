@@ -60,7 +60,7 @@ export interface Tematica {
 // Las 48 capas, en 9 temáticas. Cada capa está una sola vez.
 export const TEMATICAS: Tematica[] = [
   {
-    id: 'ruta', titulo: 'La ruta 11', frase: 'Las obras que se hacen en la ruta', color: 'var(--tema-ruta)',
+    id: 'ruta', titulo: 'Ruta 11', frase: 'Las obras que se hacen en la ruta', color: 'var(--tema-ruta)',
     capas: [{ nombre: 'obras_rn11', titulo: 'Obras en la ruta', frase: 'Arreglos que hay que hacer en la ruta 11' }],
   },
   {
@@ -74,7 +74,7 @@ export const TEMATICAS: Tematica[] = [
     ],
   },
   {
-    id: 'caminos', titulo: 'Caminos y viajes', frase: 'Rutas, trenes, puentes y aeropuertos', color: 'var(--tema-caminos)',
+    id: 'caminos', titulo: 'Transporte', frase: 'Rutas, trenes, puentes y aeropuertos', color: 'var(--tema-caminos)',
     capas: [
       { nombre: 'red_vial', titulo: 'Rutas y caminos', frase: 'Por donde andan los autos y los camiones' },
       { nombre: 'vias_secundarias', titulo: 'Caminos chicos', frase: 'Calles y caminos de tierra' },
@@ -101,7 +101,7 @@ export const TEMATICAS: Tematica[] = [
     ],
   },
   {
-    id: 'servicios', titulo: 'Escuelas, salud y más', frase: 'Lugares a los que va la gente', color: 'var(--tema-servicios)',
+    id: 'servicios', titulo: 'Escuelas y hospitales', frase: 'Lugares a los que va la gente', color: 'var(--tema-servicios)',
     capas: [
       { nombre: 'edif_educacion', titulo: 'Escuelas', frase: 'Escuelas, colegios y universidades' },
       { nombre: 'edificio_de_salud_ips', titulo: 'Hospitales', frase: 'Donde te curan' },
@@ -128,7 +128,7 @@ export const TEMATICAS: Tematica[] = [
     ],
   },
   {
-    id: 'relieve', titulo: 'Montañas y alturas', frase: 'Qué tan alto es cada lugar', color: 'var(--tema-relieve)',
+    id: 'relieve', titulo: 'Relieve', frase: 'Qué tan alto es cada lugar', color: 'var(--tema-relieve)',
     capas: [
       { nombre: 'curvas_de_nivel', titulo: 'Líneas de altura', frase: 'Unen lugares a la misma altura' },
       { nombre: 'puntos_de_alturas_topograficas', titulo: 'Cerros y picos', frase: 'Puntos con su altura' },
@@ -136,7 +136,7 @@ export const TEMATICAS: Tematica[] = [
     ],
   },
   {
-    id: 'energia', titulo: 'Luz y comunicación', frase: 'Centrales, cables y antenas', color: 'var(--tema-energia)',
+    id: 'energia', titulo: 'Energía', frase: 'Centrales, cables y antenas', color: 'var(--tema-energia)',
     capas: [
       { nombre: 'complejo_de_energia_ene', titulo: 'Centrales de energía', frase: 'Donde se hace la luz' },
       { nombre: 'lineas_de_conduccion_ene', titulo: 'Cables de alta tensión', frase: 'Llevan la luz lejos' },
@@ -144,7 +144,7 @@ export const TEMATICAS: Tematica[] = [
     ],
   },
   {
-    id: 'trabajo', titulo: 'Trabajo', frase: 'Campos, fábricas y comercios', color: 'var(--tema-trabajo)',
+    id: 'trabajo', titulo: 'Producción', frase: 'Campos, fábricas y comercios', color: 'var(--tema-trabajo)',
     capas: [
       { nombre: 'actividades_agropecuarias', titulo: 'Campo', frase: 'Estancias, tambos y granjas' },
       { nombre: 'actividades_economicas', titulo: 'Fábricas y comercios', frase: 'Donde trabaja la gente' },
@@ -171,6 +171,10 @@ export const sinSiglas = (texto: string) => texto.replace(/\bla RN ?(\d+)/g, 'la
 // ¿Hay un diálogo modal abierto (bienvenida, guía o Configuración)? Los atajos globales del visor
 // (1–6, Escape, "/" y ⌘K, Escape de Referencias) lo consultan acá para no actuar detrás de él.
 export const hayDialogoModal = () => !!document.querySelector('[aria-modal="true"]');
+// Adónde devolver el foco: si el botón quedó adentro de una pastilla del simple ya recogida (su contenido
+// está inert), a la pastilla misma; si no, al botón.
+export const destinoDeFoco = (el: HTMLElement | null | undefined) =>
+  el?.closest('[inert]') ? el.closest('.notch')?.querySelector<HTMLElement>('.notch-pastilla') ?? el : el;
 
 // ¿La tecla va a un lugar donde se escribe? Un interruptor, una casilla o un deslizador también son
 // <input>, pero no se escribe en ellos: los atajos tienen que seguir andando después de tocarlos.

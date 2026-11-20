@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@heroui/react';
-import { Binoculars, MagnifyingGlass, X, ClockCounterClockwise, Sparkle, ChatCircleText } from '@phosphor-icons/react';
+import { ArrowElbowDownLeft, Binoculars, MagnifyingGlass, X, ClockCounterClockwise, Sparkle, ChatCircleText } from '@phosphor-icons/react';
 import GeoJSON from 'ol/format/GeoJSON';
 import { buffer } from 'ol/extent';
 import { URL_WFS, WORKSPACE } from '../config';
@@ -21,6 +21,8 @@ interface Seccion {
   titulo: string;
   items: Sugerencia[];
   borrable?: boolean;
+  // En el buscador negro: las sugerencias para empezar como atajos grandes en una fila, no como lista.
+  atajos?: boolean;
 }
 
 interface Props {
@@ -28,11 +30,14 @@ interface Props {
   // Consultas predichas según lo que se ve en el mapa.
   enVista: Sugerencia[];
   onElegir: (sugerencia: Sugerencia) => void;
+  // Escritorio del simple: negro, arriba al centro, con una luz blanca que recorre el borde mientras está
+  // vacío y sin foco, como invitando a escribir (.buscador-negro en estilos.css).
+  negro?: boolean;
 }
 
 // Buscador central: con el campo vacío ofrece el historial y sugerencias; al escribir, acciones,
 // herramientas, capas y lugares (WFS sobre localidades, sin servicios externos).
-export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
+export default function Buscador({ capaPrendida, enVista, onElegir, negro }: Props) {
   const simple = useInterfaz() === 'simple';
   // El texto guía se elige por el ancho real del campo (no por el de la pantalla): así nunca queda cortado.
   const [anchoCampo, setAnchoCampo] = useState(0);
@@ -167,10 +172,20 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
   }, [texto, lugares, historial, aprendido, enVista]);
 
   // En el modo simple, las mismas sugerencias con palabras de todos los días (sin GeoServer, capas ni RN11).
-  const secciones = useMemo(
-    () => (simple ? seccionesBase.map(sec => ({ ...sec, titulo: SECCIONES_SIMPLES[sec.titulo] ?? sec.titulo, items: sec.items.map(paraModoSimple) })) : seccionesBase),
-    [seccionesBase, simple],
-  );
+  // El buscador negro (escritorio del simple) muestra poco y grande: vacío, los atajos para empezar, hasta tres
+  // recientes y dos de lo que hay en la vista (sin "Lo más consultado", que repetía); escribiendo, hasta
+  // cuatro por grupo. Así entra sin desplazar en la notebook.
+  const secciones = useMemo(() => {
+    const lista = simple ? seccionesBase.map(sec => ({ ...sec, titulo: SECCIONES_SIMPLES[sec.titulo] ?? sec.titulo, items: sec.items.map(paraModoSimple) })) : seccionesBase;
+    if (!negro) return lista;
+    if (texto.trim()) return lista.map(sec => ({ ...sec, items: sec.items.slice(0, 4) }));
+    const de = (titulo: string) => seccionesBase.findIndex(sec => sec.titulo === titulo);
+    const tomar = (titulo: string, n: number, extra?: Partial<Seccion>) => {
+      const i = de(titulo);
+      return i < 0 ? [] : [{ ...lista[i], ...extra, items: lista[i].items.slice(0, n) }];
+    };
+    return [...tomar('Sugerencias', 4, { titulo: 'Para empezar', atajos: true }), ...tomar('Recientes', 3), ...tomar('En esta vista', 2)];
+  }, [seccionesBase, simple, negro, texto]);
   const plano = secciones.flatMap(s => s.items);
   useEffect(() => setActivo(0), [texto]);
 
@@ -206,10 +221,16 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
   let indice = -1;
 
   return (
-    <div ref={contenedor} className="relative w-full">
-      <div className="panel relative flex h-[60px] items-center gap-3 pl-5 pr-3 shadow-[var(--sombra-alta)]">
-        <GlowingEffect variant="vial" spread={32} proximity={56} inactiveZone={0.3} borderWidth={2} glow disabled={false} />
-        <MagnifyingGlass size={22} className="shrink-0 text-[var(--tinta-2)]" />
+    <div
+      ref={contenedor}
+      className={negro ? 'buscador-negro superficie-notch dark relative w-full' : 'relative w-full'}
+      data-vacio={!texto || undefined}
+      // En el buscador negro (escritorio del simple), si el foco se va con Tab, las sugerencias se cierran.
+      onBlur={negro ? e => { if (!contenedor.current?.contains(e.relatedTarget as Node | null)) setAbierto(false); } : undefined}
+    >
+      <div className={`panel relative flex items-center gap-3 pl-5 pr-3 ${negro ? 'h-[64px]' : 'h-[60px]'} ${negro ? 'buscador-campo' : 'shadow-[var(--sombra-alta)]'}`}>
+        {negro ? <span aria-hidden="true" className="buscador-borde" /> : <GlowingEffect variant="vial" spread={32} proximity={56} inactiveZone={0.3} borderWidth={2} glow disabled={false} />}
+        <MagnifyingGlass size={negro ? 24 : 22} weight={negro ? 'bold' : 'regular'} className="shrink-0 text-[var(--tinta-2)]" />
         <input
           ref={entrada}
           value={texto}
@@ -226,7 +247,7 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
           aria-controls={idLista}
           aria-activedescendant={abierto && plano[activo] ? `${idLista}-${activo}` : undefined}
           aria-autocomplete="list"
-          className="h-full min-w-0 flex-1 bg-transparent text-[17px] font-medium text-[var(--tinta)] outline-none placeholder:font-normal placeholder:text-[var(--tinta-3)]"
+          className={`h-full min-w-0 flex-1 bg-transparent ${negro ? 'text-[19px] font-semibold placeholder:font-medium' : 'text-[17px] font-medium'} text-[var(--tinta)] outline-none placeholder:font-normal placeholder:text-[var(--tinta-3)]`}
         />
         {buscandoLugares && <Spinner size="sm" />}
         {texto ? (
@@ -247,7 +268,7 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
       </div>
 
       {abierto && (secciones.length > 0 || sinResultados) && (
-        <div id={idLista} role="listbox" aria-label="Sugerencias" className="despliega panel desplazable absolute inset-x-0 top-[68px] max-h-[min(560px,calc(100cqh-120px))] overflow-y-auto p-2 shadow-[var(--sombra-alta)]">
+        <div id={idLista} role="listbox" aria-label="Sugerencias" className={`despliega panel desplazable absolute inset-x-0 overflow-y-auto shadow-[var(--sombra-alta)] ${negro ? 'buscador-lista top-[74px] max-h-[min(600px,calc(100cqh-130px))] p-2.5 text-[var(--tinta)]' : 'top-[68px] max-h-[min(560px,calc(100cqh-120px))] p-2'}`}>
           {sinResultados && (
             <p className="px-4 py-6 text-[15px] leading-relaxed text-[var(--tinta-2)]">
               No encontramos “{texto.trim()}”. Probá con una localidad (Resistencia), una capa (ríos, puentes) o una herramienta (medir).
@@ -255,8 +276,8 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
           )}
           {secciones.map(seccion => (
             <section key={seccion.titulo} className="pb-1">
-              <div className="flex items-center justify-between px-3 pb-1.5 pt-3">
-                <h3 className="text-[13px] font-semibold text-[var(--tinta-3)]">{seccion.titulo}</h3>
+              <div className={`flex items-center justify-between px-3 ${negro ? 'pb-2 pt-3.5' : 'pb-1.5 pt-3'}`}>
+                <h3 className={`${negro ? 'text-[15px] font-bold' : 'text-[13px] font-semibold'} text-[var(--tinta-3)]`}>{seccion.titulo}</h3>
                 {seccion.borrable && (
                   <button
                     type="button"
@@ -264,13 +285,36 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
                       borrarHistorial();
                       setHistorial([]);
                     }}
-                    className="rounded-md px-1.5 text-[13px] font-medium text-[var(--tinta-3)] hover:text-[var(--tinta)]"
+                    className={`rounded-md px-1.5 ${negro ? 'text-[15px] font-semibold' : 'text-[13px] font-medium'} text-[var(--tinta-3)] hover:text-[var(--tinta)]`}
                   >
                     Borrar
                   </button>
                 )}
               </div>
-              {seccion.items.map(item => {
+              {seccion.atajos ? (
+                <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                  {seccion.items.map(item => {
+                    indice += 1;
+                    const i = indice;
+                    return (
+                      <div
+                        key={`${seccion.titulo}-${item.id}`}
+                        id={`${idLista}-${i}`}
+                        role="option"
+                        aria-selected={i === activo}
+                        onPointerDown={e => e.preventDefault()}
+                        onClick={() => elegir(item)}
+                        onPointerMove={() => setActivo(i)}
+                        style={{ '--i': i } as React.CSSProperties}
+                        className={`buscador-atajo flex h-[56px] min-w-0 cursor-pointer items-center gap-3 rounded-[16px] pl-2 pr-4 text-[16.5px] font-bold ${i === activo ? 'bg-white text-[#0b0c0e]' : 'bg-[var(--superficie-2)] text-[var(--tinta)]'}`}
+                      >
+                        <span className={`grid size-10 shrink-0 place-items-center rounded-[12px] ${i === activo ? 'bg-[var(--vial-suave)] text-[var(--vial-texto)]' : 'bg-[var(--superficie-3)] text-[var(--tinta-2)]'}`}><Icono sugerencia={item} /></span>
+                        <span className="truncate">{item.titulo}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : seccion.items.map(item => {
                 indice += 1;
                 const i = indice;
                 return (
@@ -283,6 +327,8 @@ export default function Buscador({ capaPrendida, enVista, onElegir }: Props) {
                     prendida={item.tipo === 'capa' ? capaPrendida(item.id.slice(5)) : undefined}
                     onElegir={() => elegir(item)}
                     onApuntar={() => setActivo(i)}
+                    grande={negro}
+                    orden={i}
                   />
                 );
               })}
@@ -313,9 +359,12 @@ interface FilaProps {
   prendida?: boolean;
   onElegir: () => void;
   onApuntar: () => void;
+  // El buscador negro del simple: filas, íconos y letras más grandes.
+  grande?: boolean;
+  orden?: number;
 }
 
-function Fila({ id, sugerencia, reciente, activa, prendida, onElegir, onApuntar }: FilaProps) {
+function Fila({ id, sugerencia, reciente, activa, prendida, onElegir, onApuntar, grande, orden = 0 }: FilaProps) {
   return (
     <div
       id={id}
@@ -324,25 +373,31 @@ function Fila({ id, sugerencia, reciente, activa, prendida, onElegir, onApuntar 
       onPointerDown={e => e.preventDefault()}
       onClick={onElegir}
       onPointerMove={onApuntar}
-      className={`flex min-h-[60px] cursor-pointer items-center gap-3.5 rounded-xl px-3 py-2 transition-colors ${activa ? 'bg-[var(--superficie-2)]' : ''}`}
+      style={grande ? ({ '--i': orden } as React.CSSProperties) : undefined}
+      className={`${grande ? 'buscador-fila ' : ''}flex cursor-pointer items-center transition-colors ${grande ? 'min-h-[70px] gap-4 rounded-[16px] px-3 py-2' : 'min-h-[60px] gap-3.5 rounded-xl px-3 py-2'} ${activa ? 'bg-[var(--superficie-2)]' : ''}`}
     >
-      <span className={`grid size-10 shrink-0 place-items-center rounded-[11px] transition-colors ${activa ? 'bg-[var(--vial-suave)] text-[var(--vial-texto)]' : 'bg-[var(--superficie-2)] text-[var(--tinta-2)]'}`}>
+      <span className={`grid shrink-0 place-items-center transition-colors ${grande ? 'size-12 rounded-[14px]' : 'size-10 rounded-[11px]'} ${activa ? 'bg-[var(--vial-suave)] text-[var(--vial-texto)]' : 'bg-[var(--superficie-2)] text-[var(--tinta-2)]'}`}>
         <Icono sugerencia={sugerencia} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-medium leading-snug">{sugerencia.titulo}</span>
-        <span className="flex items-center gap-1.5 truncate text-[13px] leading-snug text-[var(--tinta-3)]">
-          {reciente && <ClockCounterClockwise size={13} className="shrink-0" />}
+        <span className={`block truncate leading-snug text-[var(--tinta)] ${grande ? 'text-[17px] font-semibold' : 'text-[15px] font-medium'}`}>{sugerencia.titulo}</span>
+        <span className={`flex items-center gap-1.5 truncate leading-snug text-[var(--tinta-3)] ${grande ? 'mt-0.5 text-[14.5px]' : 'text-[13px]'}`}>
+          {reciente && <ClockCounterClockwise size={grande ? 15 : 13} className="shrink-0" />}
           {sugerencia.detalle}
         </span>
       </span>
       {prendida !== undefined && (
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold ${prendida ? 'bg-[var(--vial-suave)] text-[var(--vial-texto)]' : 'bg-[var(--superficie-2)] text-[var(--tinta-3)]'}`}>
+        <span className={`shrink-0 rounded-full font-semibold ${grande ? 'px-3 py-1.5 text-[14px]' : 'px-2.5 py-1 text-[12px]'} ${prendida ? 'bg-[var(--vial-suave)] text-[var(--vial-texto)]' : activa ? 'bg-[var(--superficie-3)] text-[var(--tinta-2)]' : 'bg-[var(--superficie-2)] text-[var(--tinta-3)]'}`}>
           {prendida ? 'Prendida' : 'Apagada'}
         </span>
       )}
-      {sugerencia.tecla && (
-        <kbd className="shrink-0 rounded-lg bg-[var(--superficie-2)] px-2 py-0.5 text-[13px] font-medium text-[var(--tinta-3)]">{sugerencia.tecla}</kbd>
+      {grande && (
+        <span aria-hidden="true" className={`grid size-9 shrink-0 place-items-center rounded-full bg-white text-[#0b0c0e] transition-[opacity,scale] duration-200 ${activa ? 'scale-100 opacity-100' : 'scale-75 opacity-0'}`}>
+          <ArrowElbowDownLeft size={17} weight="bold" />
+        </span>
+      )}
+      {sugerencia.tecla && !grande && (
+        <kbd className={`shrink-0 rounded-lg bg-[var(--superficie-2)] font-medium text-[var(--tinta-3)] ${grande ? 'px-2.5 py-1 text-[14px]' : 'px-2 py-0.5 text-[13px]'}`}>{sugerencia.tecla}</kbd>
       )}
     </div>
   );

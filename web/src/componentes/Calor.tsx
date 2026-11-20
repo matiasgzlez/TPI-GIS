@@ -21,7 +21,7 @@ export const admiteCalor = (nombre: string) => nombre !== 'obras_rn11' && CAPAS.
 let tarjetaPrendioLocalidades = false;
 
 // El estado de una mancha; se vuelve a pintar cuando cambian las capas o el estado de su carga.
-function useCalor(visor: Visor, nombre: string): { activo: boolean; estado: EstadoCalor } {
+export function useCalor(visor: Visor, nombre: string): { activo: boolean; estado: EstadoCalor } {
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
   useEffect(() => suscribirCapas(visor, redibujar), [visor]);
   useEffect(() => {
@@ -60,7 +60,7 @@ function mensaje(estado: EstadoCalor, simple: boolean): { tipo: 'cargando' | 'er
 
 // El estado debajo de un control (tarjeta, botón o selector). La región está siempre montada: un lector
 // de pantalla anuncia los cambios una vez, no cada vez que aparece y desaparece.
-function EstadoCalorLinea({ visor, nombre, simple }: { visor: Visor; nombre: string; simple: boolean }) {
+export function EstadoCalorLinea({ visor, nombre, simple }: { visor: Visor; nombre: string; simple: boolean }) {
   const { activo, estado } = useCalor(visor, nombre);
   const m = activo ? mensaje(estado, simple) : null;
   return (

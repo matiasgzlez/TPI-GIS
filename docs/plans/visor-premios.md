@@ -20,6 +20,7 @@ Complementar las consignas del TPI (sin reemplazarlas) con un visor que:
 | Modos | Una sola app con un interruptor Simple ↔ Profesional siempre visible. El estado (capas, zoom, selección) se comparte. La primera vez que alguien entra elige el modo en dos tarjetas, y la elección se recuerda |
 | Capas en modo simple | Temáticas y, dentro de cada una, tarjetas de capa con miniatura WMS real. Un toque en la temática la abre con sus capas apagadas y un botón "Mostrar todo" (decidido el 14/11, en lugar de prender todo al tocar). Si una temática tiene una sola capa, se prende directo |
 | Modo profesional | Tres zonas, como un QGIS moderno: sidebar de capas a la izquierda (Aceternity Sidebar, colapsable), inspector a la derecha (atributos y leyenda) y cajón inferior con la tabla (HeroUI Drawer + Table) |
+| Modo profesional (rediseño, 19/11/2026) | Reemplaza las tres zonas tipo QGIS: distribución estilo Google Maps (riel de íconos a la izquierda, buscador como tarjeta arriba a la izquierda con resultados e información debajo, herramientas como chips arriba, miniatura de Capas abajo a la izquierda, zoom abajo a la derecha y barra de estado abajo). Tema claro con estética Maps; tema oscuro con estética Earth (paneles negros). Mapa base propio: sin imágenes satelitales (la demo anda sin internet) |
 | Modo simple | Botones grandes con dibujo, lenguaje sin jerga (nada de WMS, WFS ni "feature") y una guía de primeros pasos que se puede repetir |
 | Estética | Evolucionar la actual ("Producto moderno": HeroUI v3 + Aceternity, claro y oscuro, resortes) |
 | Timelapse | Descartado: el SIG 250 no tiene datos con fechas (todo es de 2010). Se reemplaza por la animación de distancia (T5) |
@@ -943,14 +944,13 @@ Estados: `propuesto` · `aprobado` · `en curso` · `hecho` · `descartado`.
   - Anotado para después (baja):
     - en la hoja vertical con muchas capas (20) puede caerse una capa del comparador, porque la distribución se corta en la primera que no entra;
     - 23 capas sin estilo propio siguen mostrando la leyenda por defecto de GeoServer («Red Square point», «Blue Line», «Grey Fill and Black Outline»): edificaciones, señalizaciones, puertos, aeropuertos, obras portuarias, salvado de obstáculos, alturas topográficas, energía, comunicación, actividades económicas, curvas de nivel, muros de embalse, suelos y países limítrofes.
-- [ ] **T7 · Link compartible** — `aprobado`
-  - Capas, zoom, centro, selección y modo quedan en la URL.
 - [ ] **T8 · Vista 3D explotada** — `aprobado` (último; se corta si no llega)
   - Las capas activas, apiladas en pisos con deck.gl (OrbitView), limitadas a Chaco y con un tope de entidades por capa. Se puede rotar y hacer zoom, y cada piso lleva su leyenda.
   - Bloqueado por: T1.
 - ~~Timelapse por años~~ — `descartado` (sin datos temporales).
 - ~~Perfil de elevación~~ — `descartado` (sin alturas sobre la RN11).
 - ~~Modo Presentación~~ — `descartado`.
+- ~~T7 · Link compartible~~ — `descartado` (16/11, decisión de Matias).
 
 ## Restricciones
 

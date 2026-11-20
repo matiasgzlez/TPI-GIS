@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Bridge, CircleNotch, DotsThree, Drop, Path, RoadHorizon, Signpost, TrafficCone, X } from '@phosphor-icons/react';
 import { Button, Label, ListBox, Select, TextArea, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { Button as BotonConEstado } from './ui/stateful-button';
 import type Point from 'ol/geom/Point';
@@ -34,7 +35,20 @@ interface Props {
 // profesional, el panel de la derecha en el simple, una hoja desde abajo en el celular). Antes era una
 // tarjeta anclada al punto con un Overlay de OpenLayers, y según dónde se hiciera el clic quedaba debajo
 // del buscador, de la barra de capas o fuera de la pantalla. El punto se centra en el área libre del mapa.
-export default function FormObra({ visor, punto, guardando, onGuardar, onCancelar }: Props) {
+const ANCHO_ESCRITORIO = '(min-width: 1024px)';
+const escucharAncho = (avisar: () => void) => {
+  const consulta = matchMedia(ANCHO_ESCRITORIO);
+  consulta.addEventListener('change', avisar);
+  return () => consulta.removeEventListener('change', avisar);
+};
+
+export default function FormObra(props: Props) {
+  const simple = useInterfaz() === 'simple';
+  const escritorio = useSyncExternalStore(escucharAncho, () => matchMedia(ANCHO_ESCRITORIO).matches);
+  return simple && escritorio ? <FormObraSimple {...props} /> : <FormObraComun {...props} />;
+}
+
+function FormObraComun({ visor, punto, guardando, onGuardar, onCancelar }: Props) {
   const simple = useInterfaz() === 'simple';
   const [datos, setDatos] = useState<DatosObra>({ tipo_obra: 'bacheo', prioridad: 'media', descripcion: '' });
 
@@ -128,5 +142,172 @@ export default function FormObra({ visor, punto, guardando, onGuardar, onCancela
         </BotonConEstado>
       </footer>
     </form>
+  );
+}
+
+// --- Escritorio del modo simple ---
+// Va adentro del notch negro de la derecha (NotchResultados), como los resultados: todo grande y a la vista,
+// sin menús que se despliegan. Qué hay que arreglar, como pastillas con su dibujo; qué tan urgente, tres
+// botones grandes; lo que pasa, opcional; y abajo "Guardar obra" en blanco. Lo elegido va en blanco.
+const ICONO_TIPO: Record<string, React.ReactNode> = {
+  bacheo: <TrafficCone size={22} weight="bold" />,
+  repavimentacion: <RoadHorizon size={22} weight="bold" />,
+  banquina: <Path size={22} weight="bold" />,
+  senalizacion: <Signpost size={22} weight="bold" />,
+  puente: <Bridge size={22} weight="bold" />,
+  drenaje: <Drop size={22} weight="bold" />,
+  otro: <DotsThree size={22} weight="bold" />,
+};
+const COLOR_URGENCIA: Record<string, string> = { alta: 'var(--vial)', media: 'var(--warning)', baja: '#9aa0a8' };
+
+function FormObraSimple({ visor, punto, guardando, onGuardar, onCancelar }: Props) {
+  const [datos, setDatos] = useState<DatosObra>({ tipo_obra: 'bacheo', prioridad: 'media', descripcion: '' });
+  const cuerpo = useRef<HTMLDivElement>(null);
+  // Con algo escrito, el primer Escape avisa y recién el segundo descarta (no se pierde el texto sin querer).
+  const [avisoDescartar, setAvisoDescartar] = useState(false);
+  useEffect(() => {
+    if (!avisoDescartar) return;
+    const reloj = setTimeout(() => setAvisoDescartar(false), 3000);
+    return () => clearTimeout(reloj);
+  }, [avisoDescartar]);
+  const alEscape = () => {
+    if (datos.descripcion.trim() && !avisoDescartar) setAvisoDescartar(true);
+    else onCancelar();
+  };
+  // Al abrir, el foco va a lo elegido en "¿Qué hay que arreglar?" (después de que el notch se abra: inerte no
+  // recibe foco). Al cerrar, NotchResultados lo devuelve a Ajustes.
+  useEffect(() => {
+    const reloj = setTimeout(() => cuerpo.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus({ preventScroll: true }), 120);
+    return () => clearTimeout(reloj);
+  }, []);
+
+  useEffect(() => {
+    const [x, y] = punto.getCoordinates();
+    const zoom = visor.mapa.getView().getZoom();
+    volarA(visor, [x, y, x, y], { maxZoom: zoom, duracion: 500, conPanel: true });
+  }, [visor, punto]);
+
+  return (
+    <form
+      className="obra-simple flex max-h-full min-h-0 flex-col text-[var(--tinta)]"
+      onSubmit={e => { e.preventDefault(); if (!guardando) onGuardar(datos); }}
+      onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); alEscape(); } }}
+    >
+      <header className="flex items-center gap-4 pb-3 pl-6 pr-5 pt-5">
+        <EscudoRuta className="h-11 w-auto shrink-0" />
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-[26px] font-bold leading-[1.1] tracking-[-0.025em]">Una obra nueva</h2>
+          <p className="mt-1 truncate text-[16px] font-semibold text-[var(--tinta-3)]">En la ruta · {formatoCoordenada(punto.getCoordinates())}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancelar}
+          aria-label="Cancelar la obra"
+          title="Cancelar"
+          className="boton-cerrar-simple grid size-12 shrink-0 place-items-center rounded-full bg-[var(--superficie-2)] focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <X size={22} weight="bold" />
+        </button>
+      </header>
+
+      <div ref={cuerpo} className="desplazable flex min-h-0 flex-col gap-3.5 overflow-y-auto px-5 pb-1">
+        <Opciones
+          titulo="¿Qué hay que arreglar?"
+          valor={datos.tipo_obra}
+          onCambiar={tipo_obra => setDatos({ ...datos, tipo_obra })}
+          className="flex flex-wrap gap-2"
+          opciones={TIPOS_OBRA.map(t => ({ id: t, contenido: <>{ICONO_TIPO[t]}{ETIQUETA_TIPO[t]}</> }))}
+          claseOpcion="h-11 gap-2 pl-3.5 pr-4"
+        />
+        <Opciones
+          titulo="¿Qué tan urgente es?"
+          valor={datos.prioridad}
+          onCambiar={prioridad => setDatos({ ...datos, prioridad })}
+          className="grid grid-cols-3 gap-2"
+          opciones={PRIORIDADES.map(p => ({
+            id: p,
+            contenido: <><span aria-hidden="true" className="size-3 rounded-full" style={{ backgroundColor: COLOR_URGENCIA[p] }} />{URGENCIA[p]}</>,
+          }))}
+          claseOpcion="h-12 justify-center gap-2.5"
+        />
+        <label className="flex flex-col gap-2">
+          <span className="obra-titulo text-[17px] font-bold">Contá qué pasa <span className="font-semibold text-[var(--tinta-3)]">(si querés)</span></span>
+          <textarea
+            rows={2}
+            value={datos.descripcion}
+            onChange={e => { setDatos({ ...datos, descripcion: e.target.value }); setAvisoDescartar(false); }}
+            placeholder="Ej.: bache profundo en el carril norte"
+            className="obra-texto resize-none rounded-[18px] bg-[var(--superficie-2)] min-h-[60px] px-4 py-3 text-[17px] font-medium leading-snug text-[var(--tinta)] outline-none placeholder:text-[var(--tinta-3)]"
+          />
+        </label>
+      </div>
+
+      <p role="status" aria-live="polite" className={`shrink-0 px-6 text-[16px] font-semibold text-[#ff6a2b] transition-[opacity,max-height] duration-300 ${avisoDescartar ? 'max-h-10 pt-3 opacity-100' : 'max-h-0 opacity-0'}`}>
+        {avisoDescartar ? 'Escape otra vez para descartar lo escrito' : ''}
+      </p>
+      <footer className="flex shrink-0 gap-2.5 px-5 pb-5 pt-4">
+        <button
+          type="button"
+          onClick={onCancelar}
+          disabled={guardando}
+          className="boton-ajuste h-[52px] flex-1 rounded-[18px] bg-[var(--superficie-2)] text-[17px] font-bold hover:bg-[var(--superficie-3)] focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={guardando}
+          className="boton-ajuste flex h-[52px] flex-[1.6] items-center justify-center gap-2.5 rounded-[18px] bg-white text-[17px] font-bold text-[#0b0c0e] focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-80"
+        >
+          {guardando && <CircleNotch size={22} weight="bold" className="animate-spin" />}
+          {guardando ? 'Guardando…' : 'Guardar obra'}
+        </button>
+      </footer>
+    </form>
+  );
+}
+
+// Un grupo de opciones de a una (radio): con las flechas se pasa a la siguiente, como un radio de verdad.
+function Opciones({ titulo, valor, onCambiar, opciones, className, claseOpcion }: {
+  titulo: string;
+  valor: string;
+  onCambiar: (valor: string) => void;
+  opciones: { id: string; contenido: React.ReactNode }[];
+  className: string;
+  claseOpcion: string;
+}) {
+  const grupo = useRef<HTMLDivElement>(null);
+  const mover = (e: React.KeyboardEvent, i: number) => {
+    const paso = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!paso) return;
+    e.preventDefault();
+    const siguiente = (i + paso + opciones.length) % opciones.length;
+    onCambiar(opciones[siguiente].id);
+    grupo.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[siguiente]?.focus();
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="obra-titulo text-[17px] font-bold">{titulo}</span>
+      <div ref={grupo} role="radiogroup" aria-label={titulo} className={className}>
+        {opciones.map((o, i) => {
+          const elegida = o.id === valor;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={elegida}
+              tabIndex={elegida ? 0 : -1}
+              onClick={() => onCambiar(o.id)}
+              onKeyDown={e => mover(e, i)}
+              className={`opcion-obra flex items-center rounded-[16px] text-[17px] font-bold focus-visible:outline-2 focus-visible:outline-offset-2 ${claseOpcion}`}
+              data-elegida={elegida || undefined}
+            >
+              {o.contenido}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

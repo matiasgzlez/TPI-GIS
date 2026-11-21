@@ -56,6 +56,19 @@ const Imprimir = lazy(() => import('./exportar/Imprimir'));
 const TablaDatos = lazy(() => import('./componentes/pro/TablaDatos'));
 // Comparador deslizante (T6): la cortina y sus listas, recién al abrirlo.
 const Comparador = lazy(() => import('./componentes/Comparador'));
+// Paneles del cajón del profesional (Análisis, Datos, Navegación y Base de datos): se cargan al abrirlos.
+const PanelSeleccion = lazy(() => import('./componentes/pro/paneles/Seleccion'));
+const PanelEstadisticas = lazy(() => import('./componentes/pro/paneles/Estadisticas'));
+const PanelObras = lazy(() => import('./componentes/pro/paneles/Obras'));
+const PanelServicios = lazy(() => import('./componentes/pro/paneles/Servicios'));
+const PanelMapasBase = lazy(() => import('./componentes/pro/paneles/MapasBase'));
+const PanelCoordenadas = lazy(() => import('./componentes/pro/paneles/Coordenadas'));
+const PanelVistas = lazy(() => import('./componentes/pro/paneles/Vistas'));
+const PanelCatalogo = lazy(() => import('./componentes/pro/paneles/Catalogo'));
+import { aplicarVista, vistaDelEnlace } from './vistas';
+const ENLACE_INICIAL = vistaDelEnlace();
+if (ENLACE_INICIAL) history.replaceState(null, '', location.pathname + location.search);
+import { mapaBaseGuardado, ponerMapaBase } from './mapaBase';
 
 // Corre el mapa hacia la izquierda si el notch de resultados de la derecha tapa una zona (extensión en
 // coordenadas del mapa). Todo en píxeles de pantalla: el mapa no tiene zoom de interfaz, el notch sí
@@ -94,6 +107,11 @@ function useMedia(consultaCss: string) {
 // Celular o tablet chica: menos de 1024 px.
 const useCelular = () => useMedia('(max-width: 1023px)');
 
+const TITULOS_CAJON: Record<Cajon, string> = {
+  capas: 'Capas', leyenda: 'Leyenda', seleccion: 'Selección espacial', estadisticas: 'Estadísticas', obras: 'Obras RN11',
+  servicios: 'Servicios y descargas', 'mapas-base': 'Mapas base', coordenada: 'Ir a coordenada', vistas: 'Vistas guardadas', catalogo: 'Base de datos',
+};
+
 // La ruta nacional del tablero: la RN11 en Chaco desde el botón, o cualquier otra con doble clic.
 interface EstadoRuta { cargando: boolean; activa: Ruta | null; tramos?: number }
 
@@ -125,6 +143,8 @@ export default function App() {
   const [guia, setGuia] = useState(false);
   // Pro: lo abierto en el cajón del riel (Capas o Leyenda), o nada.
   const [cajon, setCajon] = useState<Cajon | null>(null);
+  // La sidebar del profesional abierta (300 px, con los nombres): corre todo lo de la izquierda.
+  const [rielAbierto, setRielAbierto] = useState(false);
   const [temasAbierto, setTemasAbierto] = useState(false);
   // Tabla de datos (T4, solo en el profesional): la capa abierta y si está agrandada. Su alto (medido) le
   // corre el borde de abajo al encuadre del mapa y sube los botones de zoom.
@@ -165,6 +185,10 @@ export default function App() {
     let inicio: ReturnType<typeof setTimeout> | undefined;
     let fin: ReturnType<typeof setTimeout> | undefined;
     let arrancado = false;
+    // Un enlace de vista (#mapa=zoom/lat/lon&capas=…) reemplaza el vuelo a Chaco. Se lee al cargar el módulo
+    // (ENLACE_INICIAL): con StrictMode este efecto corre dos veces y la segunda ya no encontraba el hash.
+    const enlace = ENLACE_INICIAL;
+    const entrar = (duracion: number) => (enlace ? aplicarVista(v, enlace, duracion > 0) : verChaco(v, duracion));
     const viewport = v.mapa.getViewport()!;
     const terminar = () => {
       viewport.removeEventListener('pointerdown', saltear);
@@ -176,7 +200,7 @@ export default function App() {
       if (arrancado) return;
       arrancado = true;
       inicio = setTimeout(() => {
-        verChaco(v, 1600);
+        entrar(1600);
         fin = setTimeout(terminar, 1650);
       }, 350);
     };
@@ -188,7 +212,7 @@ export default function App() {
       clearTimeout(inicio);
       clearTimeout(fin);
       arrancado = true;
-      verChaco(v, 0);
+      entrar(0);
     }
     viewport.addEventListener('pointerdown', saltear);
     viewport.addEventListener('wheel', saltear, { passive: true });
@@ -205,6 +229,15 @@ export default function App() {
   useEffect(() => {
     if (visor) aplicarFactor(visor, factor);
   }, [visor, factor]);
+
+  // Marca en <html> el profesional de escritorio: lo que HeroUI dibuja fuera de la interfaz (los desplegables
+  // de los Select) toma de ahí los colores negros del pro.
+  useEffect(() => { document.documentElement.toggleAttribute('data-pro-escritorio', interfaz === 'pro' && !celular); }, [interfaz, celular]);
+
+  // El mapa base externo es del profesional de escritorio; en el simple y en el celular, el papel.
+  useEffect(() => {
+    if (visor) ponerMapaBase(visor, interfaz === 'pro' && !celular ? mapaBaseGuardado() : 'papel', false);
+  }, [visor, interfaz, celular]);
 
   useEffect(() => {
     if (!visor) return;
@@ -304,7 +337,7 @@ export default function App() {
   function cerrarTabla() {
     const adentro = !!document.activeElement?.closest('section[aria-label^="Tabla de datos:"]');
     setTabla(null);
-    if (adentro) requestAnimationFrame(() => document.querySelector<HTMLElement>('button[aria-label="Tabla de datos (T)"], button[aria-label="Tabla de atributos (T)"]')?.focus());
+    if (adentro) requestAnimationFrame(() => document.querySelector<HTMLElement>('button[aria-label="Tabla de datos (T)"], button[aria-label="Tabla de atributos (T)"], .riel-pro [aria-label="Tabla de atributos"]')?.focus());
   }
   function alternarTabla() {
     if (tabla) { cerrarTabla(); return; }
@@ -650,7 +683,8 @@ export default function App() {
       {visor && (
         <InterfazContexto.Provider value={interfaz}>
         <MotionConfig reducedMotion={preferencias.movimientoReducido ? 'always' : 'user'}>
-        <div className="interfaz" data-interfaz={interfaz} inert={modal}>
+        {/* El profesional de escritorio lleva los paneles negros del simple: adentro rige siempre el tema oscuro. */}
+        <div className={interfaz === 'pro' && !celular ? 'interfaz dark' : 'interfaz'} data-interfaz={interfaz} inert={modal}>
           {/* Mapa de calor (T3): si una mancha necesita acercarse o no se pudo traer, se avisa sobre el mapa. */}
           {visor && (
             <div className="pointer-events-none absolute inset-x-0 top-[92px] z-20 flex justify-center px-4 max-lg:top-[150px]">
@@ -788,9 +822,13 @@ export default function App() {
                   el zoom abajo a la derecha y la barra de estado de punta a punta. --izq: hasta dónde llega lo
                   de la izquierda (el riel y el cajón abierto); --abajo: el borde de abajo libre (sobre la barra
                   de estado y, si está abierta, la tabla). */}
-              <div className="pro-maps contents" style={{ '--izq': `calc(var(--ancho-riel) + ${cajon ? 'var(--ancho-cajon)' : '0px'})`, '--abajo': `calc(var(--alto-estado) + 16px + ${altoTabla ? `${altoTabla + 12}px` : '0px'})`, ...(preferencias.minimapa ? {} : { '--alto-mini': '-14px' }) } as React.CSSProperties}>
+              <div className="pro-maps contents" style={{ '--ancho-riel': rielAbierto ? '300px' : '60px', '--izq': `calc(var(--ancho-riel) + ${cajon ? 'var(--ancho-cajon)' : '0px'})`, '--abajo': `calc(var(--alto-estado) + 16px + ${altoTabla ? `${altoTabla + 12}px` : '0px'})`, ...(preferencias.minimapa ? {} : { '--alto-mini': '-14px' }) } as React.CSSProperties}>
                 <Riel
                   estilo={retraso(40)}
+                  abierta={rielAbierto}
+                  onAbierta={setRielAbierto}
+                  ruta={!!ruta.activa}
+                  onRuta={() => mostrarRuta(RN11, true)}
                   cajon={cajon}
                   onCajon={setCajon}
                   tabla={!!tabla}
@@ -807,13 +845,13 @@ export default function App() {
                   de la vista): así recuerda qué grupos de capas estaban abiertos y dónde estaba el desplazamiento. */}
               <aside
                 id="cajon-pro"
-                aria-label={cajon === 'leyenda' ? 'Leyenda' : 'Capas'}
+                aria-label={TITULOS_CAJON[cajon ?? 'capas']}
                 inert={!cajon}
                 data-abierto={cajon ? true : undefined}
                 className="cajon-pro pointer-events-auto absolute bottom-[var(--alto-estado)] left-[var(--ancho-riel)] top-0 z-20 flex w-[var(--ancho-cajon)] flex-col"
               >
-                <button type="button" onClick={() => setCajon(null)} aria-label={`Cerrar ${cajon === 'leyenda' ? 'la leyenda' : 'las capas'}`} title="Cerrar" className="cajon-cerrar absolute right-3 top-3.5 z-10 grid size-10 place-items-center rounded-full"><X size={18} weight="bold" /></button>
-                <div hidden={cajon === 'leyenda'} className="flex min-h-0 flex-1 flex-col">
+                <button type="button" onClick={() => setCajon(null)} aria-label={`Cerrar ${TITULOS_CAJON[cajon ?? 'capas'].toLowerCase()}`} title="Cerrar" className="cajon-cerrar absolute right-3 top-3.5 z-10 grid size-10 place-items-center rounded-full"><X size={18} weight="bold" /></button>
+                <div hidden={cajon !== 'capas' && cajon !== null} className="flex min-h-0 flex-1 flex-col">
                   <PanelCapas visor={visor} plegable={false} onTabla={abrirTabla} tablaAbierta={tabla?.capa ?? null} />
                   <p className="cajon-pie shrink-0 border-t border-[var(--linea)] px-5 py-3 text-[12.5px] leading-snug text-[var(--tinta-3)]">
                     <strong className="font-semibold text-[var(--tinta-2)]">Fuente:</strong> IGN · SIG 250 · GeoServer (workspace <code className="font-mono">tpi</code>) · WMS 1.3.0 en teselas de 512 px · SRC EPSG:3857
@@ -830,6 +868,16 @@ export default function App() {
                     </section>
                   </section>
                 )}
+                <Suspense fallback={null}>
+                  {cajon === 'seleccion' && <PanelSeleccion onPreguntar={preguntar} />}
+                  {cajon === 'estadisticas' && <PanelEstadisticas visor={visor} />}
+                  {cajon === 'obras' && <PanelObras visor={visor} recarga={recargaObras} onConsulta={consulta => { setTablero(null); setResultados({ tipo: 'consulta', consulta }); }} onTabla={() => abrirTabla('obras_rn11')} onNueva={() => setModo('alta')} />}
+                  {cajon === 'servicios' && <PanelServicios visor={visor} />}
+                  {cajon === 'mapas-base' && <PanelMapasBase visor={visor} />}
+                  {cajon === 'coordenada' && <PanelCoordenadas visor={visor} />}
+                  {cajon === 'vistas' && <PanelVistas visor={visor} />}
+                  {cajon === 'catalogo' && <PanelCatalogo onTabla={abrirTabla} />}
+                </Suspense>
               </aside>
 
               {/* Arriba: el buscador (una tarjeta, como la de un mapa web), los chips y el interruptor de modo. */}

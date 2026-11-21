@@ -1,81 +1,141 @@
-import { FilePdf, GearSix, ListBullets, Moon, SplitHorizontal, Stack, Sun, Table as IconoTabla, type Icon } from '@phosphor-icons/react';
+import { Fragment } from 'react';
+import {
+  IconBarrierBlock, IconBookmark, IconChartBar, IconCloudDownload, IconCurrentLocation, IconDatabase, IconFileTypePdf,
+  IconLayoutColumns, IconList, IconMap, IconMoon, IconRoad, IconSettings, IconShape, IconStack2, IconSun, IconTable,
+} from '@tabler/icons-react';
 import { motion } from 'motion/react';
-import { RESORTE } from '../../movimiento';
+import { Sidebar, SidebarBody, SidebarLink } from '@/componentes/ui/sidebar';
+import { cn } from '@/lib/utils';
 import EscudoRuta from '../EscudoRuta';
 
-export type Cajon = 'capas' | 'leyenda';
+// Lo que se abre en el cajón, al lado de la sidebar.
+export type Cajon = 'capas' | 'leyenda' | 'seleccion' | 'estadisticas' | 'obras' | 'servicios' | 'mapas-base' | 'coordenada' | 'vistas' | 'catalogo';
 
-// El riel del modo profesional, pegado al borde izquierdo de punta a punta (como el de un mapa web): arriba
-// el escudo del visor; después lo que se abre al costado (Capas y Leyenda, en el cajón) y lo que se abre en
-// el mapa (la tabla, el comparador e imprimir); abajo, el tema y los ajustes. Cada botón es un ícono en una
-// pastilla con su nombre debajo; lo abierto lleva la pastilla de color, que se desliza de un botón al otro.
-export default function Riel({ estilo, cajon, onCajon, tabla, onTabla, comparar, onComparar, onImprimir, oscuro, onTema, onAjustes }: {
+// El riel del modo profesional, con la sidebar de Aceternity: angosta (60 px, solo íconos) y se abre a 300 px
+// con los nombres al pasar el mouse o al entrar con el teclado; al abrirse corre el cajón, el buscador y lo
+// demás (no se superpone). Arriba el escudo y las capas; después las secciones (Análisis, Datos, Navegación y
+// Base de datos); abajo, el tema y los ajustes.
+export default function Riel({ estilo, abierta, onAbierta, cajon, onCajon, tabla, onTabla, comparar, onComparar, ruta, onRuta, onImprimir, oscuro, onTema, onAjustes }: {
   estilo?: React.CSSProperties;
+  abierta: boolean;
+  onAbierta: (abierta: boolean) => void;
   cajon: Cajon | null;
   onCajon: (c: Cajon | null) => void;
   tabla: boolean;
   onTabla: () => void;
   comparar: boolean;
   onComparar: () => void;
+  ruta: boolean;
+  onRuta: () => void;
   onImprimir: () => void;
   oscuro: boolean;
   onTema: () => void;
   onAjustes: () => void;
 }) {
+  const alCajon = (c: Cajon) => ({ activo: cajon === c, expandido: cajon === c, controla: 'cajon-pro', onPress: () => onCajon(cajon === c ? null : c) });
+  const secciones: { titulo?: string; items: ItemProps[] }[] = [
+    { items: [
+      { icono: IconStack2, etiqueta: 'Capas', ...alCajon('capas') },
+      { icono: IconList, etiqueta: 'Leyenda', ...alCajon('leyenda') },
+    ] },
+    { titulo: 'Análisis', items: [
+      { icono: IconShape, etiqueta: 'Selección espacial', ...alCajon('seleccion') },
+      { icono: IconChartBar, etiqueta: 'Estadísticas', ...alCajon('estadisticas') },
+      { icono: IconRoad, etiqueta: 'Tablero RN11', activo: ruta, presionado: ruta, onPress: onRuta },
+      { icono: IconLayoutColumns, etiqueta: 'Comparar', atajo: 'C', activo: comparar, presionado: comparar, onPress: onComparar },
+    ] },
+    { titulo: 'Datos', items: [
+      { icono: IconTable, etiqueta: 'Tabla de atributos', atajo: 'T', activo: tabla, presionado: tabla, onPress: onTabla },
+      { icono: IconBarrierBlock, etiqueta: 'Obras RN11', ...alCajon('obras') },
+      { icono: IconCloudDownload, etiqueta: 'Servicios y descargas', ...alCajon('servicios') },
+      { icono: IconMap, etiqueta: 'Mapas base', ...alCajon('mapas-base') },
+      { icono: IconFileTypePdf, etiqueta: 'Exportar a PDF', atajo: 'P', onPress: onImprimir },
+    ] },
+    { titulo: 'Navegación', items: [
+      { icono: IconCurrentLocation, etiqueta: 'Ir a coordenada', ...alCajon('coordenada') },
+      { icono: IconBookmark, etiqueta: 'Vistas guardadas', ...alCajon('vistas') },
+    ] },
+    { titulo: 'Base de datos', items: [
+      { icono: IconDatabase, etiqueta: 'Tablas de PostGIS', ...alCajon('catalogo') },
+    ] },
+  ];
+
   return (
-    <nav aria-label="Menú del visor" style={estilo} className="riel-pro entra panel pointer-events-auto absolute bottom-[var(--alto-estado)] left-0 top-0 z-30 flex w-[var(--ancho-riel)] flex-col items-center pb-3 pt-3.5">
+    <nav aria-label="Menú del visor" style={estilo} className="entra pointer-events-auto absolute bottom-[var(--alto-estado)] left-0 top-0 z-30">
       <h1 className="sr-only">Visor SIG · RN11 Chaco</h1>
-      <span className="mb-4 grid h-12 place-items-center" title="Visor SIG · RN11 Chaco · IGN SIG 250 · UTN FRRe 2026">
-        <EscudoRuta className="h-10 w-auto" />
-      </span>
-      <div className="flex w-full flex-col gap-1.5">
-        <Item icono={Stack} etiqueta="Capas" activo={cajon === 'capas'} expandido={cajon === 'capas'} controla="cajon-pro" onPress={() => onCajon(cajon === 'capas' ? null : 'capas')} />
-        <Item icono={ListBullets} etiqueta="Leyenda" activo={cajon === 'leyenda'} expandido={cajon === 'leyenda'} controla="cajon-pro" onPress={() => onCajon(cajon === 'leyenda' ? null : 'leyenda')} />
-        <span aria-hidden="true" className="mx-auto my-1.5 h-px w-9 bg-[var(--linea)]" />
-        <Item icono={IconoTabla} etiqueta="Atributos" titulo={tabla ? 'Cerrar la tabla de atributos (T)' : 'Tabla de atributos (T)'} activo={tabla} presionado={tabla} onPress={onTabla} />
-        <Item icono={SplitHorizontal} etiqueta="Comparar" titulo="Comparar dos juegos de capas (C)" activo={comparar} presionado={comparar} onPress={onComparar} />
-        <Item icono={FilePdf} etiqueta="Exportar" titulo="Exportar a PDF" atajo="P" onPress={onImprimir} />
-      </div>
-      <div className="mt-auto flex w-full flex-col gap-1.5">
-        <Item icono={oscuro ? Sun : Moon} etiqueta={oscuro ? 'Claro' : 'Oscuro'} titulo={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={onTema} />
-        <Item icono={GearSix} etiqueta="Ajustes" titulo="Configuración y ayuda" onPress={onAjustes} />
-      </div>
+      <Sidebar open={abierta} setOpen={v => onAbierta(typeof v === 'function' ? v(abierta) : v)}>
+        <SidebarBody
+          data-abierta={abierta || undefined}
+          className="riel-pro justify-between gap-4 bg-[var(--superficie)] dark:bg-[var(--superficie)]"
+          onFocus={() => onAbierta(true)}
+          onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onAbierta(false); }}
+        >
+          <div className="riel-lista -mx-2 flex flex-1 flex-col overflow-x-hidden overflow-y-auto px-2">
+            <span className="relative z-20 flex items-center gap-2.5 py-1" title="Visor SIG · RN11 Chaco · IGN SIG 250 · UTN FRRe 2026">
+              <EscudoRuta className="h-7 w-7 shrink-0" />
+              {abierta && (
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="whitespace-pre text-[17px] font-semibold text-[var(--tinta)]">
+                  Visor SIG · RN11 Chaco
+                </motion.span>
+              )}
+            </span>
+            <div className="mt-5 flex flex-col">
+              {secciones.map((s, i) => (
+                <Fragment key={s.titulo ?? i}>
+                  {s.titulo && (
+                    <div className="riel-seccion flex h-8 items-center" aria-hidden={!abierta || undefined}>
+                      {abierta
+                        ? <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="whitespace-pre text-[13px] font-bold uppercase tracking-[0.07em] text-[var(--tinta-3)]">{s.titulo}</motion.span>
+                        : <span className="h-px w-full bg-[var(--linea)]" />}
+                    </div>
+                  )}
+                  <div role={s.titulo ? 'group' : undefined} aria-label={s.titulo} className="flex flex-col gap-0.5">
+                    {s.items.map(item => <Item key={item.etiqueta} {...item} />)}
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <Item icono={oscuro ? IconSun : IconMoon} etiqueta={oscuro ? 'Tema claro' : 'Tema oscuro'} onPress={onTema} />
+            <Item icono={IconSettings} etiqueta="Ajustes" onPress={onAjustes} />
+          </div>
+        </SidebarBody>
+      </Sidebar>
     </nav>
   );
 }
 
-function Item({ icono: Icono, etiqueta, titulo = etiqueta, atajo, activo, expandido, presionado, controla, onPress }: {
-  icono: Icon;
+interface ItemProps {
+  icono: typeof IconStack2;
   etiqueta: string;
-  titulo?: string;
   atajo?: string;
   activo?: boolean;
   expandido?: boolean;
   presionado?: boolean;
   controla?: string;
   onPress: () => void;
-}) {
+}
+
+function Item({ icono: Icono, etiqueta, atajo, activo, expandido, presionado, controla, onPress }: ItemProps) {
   return (
-    <button
-      type="button"
-      onClick={onPress}
-      aria-label={titulo}
-      title={atajo ? `${titulo} (${atajo})` : titulo}
+    <SidebarLink
+      link={{
+        label: etiqueta,
+        href: '#',
+        icon: <Icono className={cn('h-[22px] w-[22px] shrink-0 text-neutral-700 dark:text-neutral-200', activo && 'text-[var(--acento-tinta)] dark:text-[var(--acento-tinta)]')} />,
+      }}
+      role="button"
+      aria-label={etiqueta}
+      title={atajo ? `${etiqueta} (${atajo})` : etiqueta}
       aria-keyshortcuts={atajo}
       aria-expanded={controla ? expandido : undefined}
       aria-controls={controla && expandido ? controla : undefined}
       aria-pressed={presionado}
       data-activo={activo || undefined}
-      className="item-riel group flex w-full flex-col items-center gap-1 py-1 focus-visible:outline-none"
-    >
-      <span className="item-riel-pastilla relative grid h-9 w-[58px] place-items-center rounded-full">
-        {/* La de Capas y Leyenda se desliza entre las dos (es un solo cajón); la de lo que se abre en el mapa, no. */}
-        {activo && (controla
-          ? <motion.span layoutId="riel-cajon" transition={RESORTE} className="absolute inset-0 rounded-full bg-[var(--acento-suave)]" />
-          : <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={RESORTE} className="absolute inset-0 rounded-full bg-[var(--acento-suave)]" />)}
-        <Icono size={22} weight={activo ? 'fill' : 'regular'} className="relative" />
-      </span>
-      <span aria-hidden="true" className="text-[13px] font-semibold leading-none tracking-[-0.005em]">{etiqueta}</span>
-    </button>
+      onClick={e => { e.preventDefault(); onPress(); }}
+      onKeyDown={e => { if (e.key === ' ') { e.preventDefault(); onPress(); } }}
+      className="item-riel-aceternity -mx-[7px] gap-3 rounded-lg px-[7px] py-[7px]"
+    />
   );
 }

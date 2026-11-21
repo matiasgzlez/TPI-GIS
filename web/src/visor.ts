@@ -734,7 +734,7 @@ export function cambiarOpacidad(visor: Visor, nombre: string, opacidad: number) 
   actualizarWms(visor);
 }
 
-function actualizarWms(visor: Visor) {
+export function actualizarWms(visor: Visor) {
   const nombres = capasVisibles(visor);
   // Una capa vista como calor no se pide al WMS: sus puntos no se dibujan debajo de las manchas.
   for (const [nombre, capa] of visor.calor) {

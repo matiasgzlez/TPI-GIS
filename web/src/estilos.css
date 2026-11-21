@@ -531,6 +531,13 @@ input, textarea { caret-color: var(--vial); }
    blanca; en oscuro, sobre el gris de la pastilla. */
 .notch .leyenda-wms { filter: none; }
 html.dark .notch .leyenda-wms { filter: invert(1) hue-rotate(180deg) saturate(0.9) brightness(0.92); }
+/* Lo mismo en el profesional, que lleva .dark en toda la interfaz (paneles negros del simple): el minimapa y las
+   leyendas siguen al tema de verdad. */
+.interfaz[data-interfaz="pro"].dark :is(.capa-wms, .leyenda-wms) { filter: none; }
+/* En claro la leyenda trae letra oscura: va sobre una tarjeta blanca, como en el simple. */
+.interfaz[data-interfaz="pro"].dark .leyenda-wms { background: #fff; border-radius: 8px; padding: 6px 10px; }
+html.dark .interfaz[data-interfaz="pro"].dark .leyenda-wms { background: none; padding: 0; }
+html.dark .interfaz[data-interfaz="pro"].dark :is(.capa-wms, .leyenda-wms) { filter: invert(1) hue-rotate(180deg) saturate(0.9) brightness(0.92); }
 .leyenda-colores { background: #fff; }
 html.dark .leyenda-colores { background: var(--superficie-3); }
 
@@ -1070,30 +1077,33 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
 .acciones-pista [role="radiogroup"] button[aria-checked="true"] { color: #0b0c0e; }
 
 /* ============================================================================================================
-   Modo profesional como un mapa web (rediseño del 19/11/2026). Claro: tarjetas blancas, sombras cortas en dos
-   capas, chips de borde completo y grises neutros (la familia de un mapa web). Oscuro: paneles negros y planos
-   como los de un globo de noche. El acento sigue siendo el naranja de la ruta: tiñe lo elegido (el riel y los
-   chips), en suave. Solo en escritorio; el celular del profesional no cambia.
+   Modo profesional como un mapa web (rediseño del 19/11/2026), con los colores del modo simple (20/11): paneles
+   negros (gris oscuro con el tema oscuro) y letra clara; la interfaz lleva la clase .dark. El acento sigue siendo
+   el naranja de la ruta: tiñe lo elegido (el riel y los chips). Solo en escritorio; el celular no cambia.
    ============================================================================================================ */
 @media (min-width: 1024px) {
   .interfaz[data-interfaz="pro"] {
-    --ancho-riel: 76px;
+    --ancho-riel: 60px;
     --ancho-cajon: 380px;
     --ancho-columna: 400px;
     --alto-estado: 36px;
     --alto-mini: 120px;
-    --superficie: #ffffff;
-    --superficie-2: #f1f3f4;
-    --superficie-3: #e8eaed;
-    --tinta: #1f1f1f;
-    --tinta-2: #444746;
-    --tinta-3: #5f6368;
-    --linea: #e3e3e3;
-    --linea-fuerte: #c7c7c7;
-    --acento-suave: #fde4d8;
-    --acento-tinta: #a8360c;
-    --sombra: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
-    --sombra-alta: 0 1px 3px rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+    /* Los paneles, del mismo negro que el modo simple (#262a30 con el tema oscuro), con su letra clara. */
+    --notch-fondo: #0b0c0e;
+    /* La clase .dark de la interfaz oscurece el papel: el fondo del mapa (y del minimapa mientras carga) sigue al tema real. */
+    --papel: #eceeeb;
+    --superficie: var(--notch-fondo);
+    --superficie-2: color-mix(in srgb, var(--notch-fondo), #fff 8%);
+    --superficie-3: color-mix(in srgb, var(--notch-fondo), #fff 13%);
+    --tinta: #f1f2f0;
+    --tinta-2: #c0c5ca;
+    --tinta-3: #969ca3;
+    --linea: color-mix(in srgb, var(--notch-fondo), #fff 10%);
+    --linea-fuerte: color-mix(in srgb, var(--notch-fondo), #fff 20%);
+    --acento-suave: #3a2219;
+    --acento-tinta: #ff8a5c;
+    --sombra: 0 1px 2px rgba(0, 0, 0, 0.25), 0 10px 30px -12px rgba(0, 0, 0, 0.45);
+    --sombra-alta: 0 2px 4px rgba(0, 0, 0, 0.3), 0 24px 60px -24px rgba(0, 0, 0, 0.6);
     --surface: var(--superficie);
     --surface-secondary: var(--superficie-2);
     --overlay: var(--superficie);
@@ -1106,24 +1116,17 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
     --separator: var(--linea);
     color: var(--tinta);
   }
-  .dark .interfaz[data-interfaz="pro"] {
-    --superficie: #1f1f1f;
-    --superficie-2: #2b2b2b;
-    --superficie-3: #383838;
-    --tinta: #e8e8e8;
-    --tinta-2: #c4c7c5;
-    --tinta-3: #a0a4a8;
-    --linea: #333333;
-    --linea-fuerte: #4a4a4a;
-    --acento-suave: #4a2617;
-    --acento-tinta: #ffb08c;
-    --sombra: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px 2px rgba(0, 0, 0, 0.35);
-    --sombra-alta: 0 2px 4px rgba(0, 0, 0, 0.5), 0 6px 16px 4px rgba(0, 0, 0, 0.4);
-  }
+  html.dark .interfaz[data-interfaz="pro"] { --notch-fondo: #262a30; --tinta-3: #a9afb6; --papel: #0e1012; }
   .interfaz[data-interfaz="pro"] .panel { border-radius: 18px; }
 
   /* El riel: pegado al borde, plano, separado del mapa por una línea (no flota). */
-  .riel-pro.panel { border-radius: 0; box-shadow: 1px 0 0 var(--linea); }
+  .riel-pro { box-shadow: 1px 0 0 var(--linea); transition: box-shadow 0.3s; }
+  .riel-pro[data-abierta] { box-shadow: 1px 0 0 var(--linea), 12px 0 32px -12px rgba(0, 0, 0, 0.6); }
+  .item-riel-aceternity { transition: background-color 0.2s; }
+  .item-riel-aceternity:hover { background: var(--superficie-2); }
+  .item-riel-aceternity[data-activo] { background: var(--acento-suave); }
+  .item-riel-aceternity[data-activo] > span { color: var(--acento-tinta); }
+  .item-riel-aceternity:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
   .item-riel { color: var(--tinta-2); }
   .item-riel .item-riel-pastilla { transition: background-color 0.2s; }
   .item-riel:hover .item-riel-pastilla { background: var(--superficie-2); }
@@ -1135,13 +1138,12 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
   .item-riel[data-activo]:hover { color: var(--acento-tinta); }
 
   /* El cajón: del alto entero, plano, pegado al riel. Lo de adentro (el panel de capas) pierde su tarjeta. */
-  .cajon-pro { background: var(--superficie); box-shadow: 1px 0 0 var(--linea), 6px 0 18px -10px rgba(60, 64, 67, 0.35); }
-  .dark .cajon-pro { box-shadow: 1px 0 0 var(--linea), 6px 0 18px -10px rgba(0, 0, 0, 0.7); }
+  .cajon-pro { background: var(--superficie); box-shadow: 1px 0 0 var(--linea), 6px 0 18px -10px rgba(0, 0, 0, 0.7); }
   .cajon-pro .panel[aria-label="Capas"] { flex: 1; min-height: 0; border-radius: 0; box-shadow: none; background: transparent; }
   .cajon-pro .panel[aria-label="Capas"] > header { padding-right: 60px; }
   /* Cerrado queda armado pero afuera: se corre hacia el riel y se apaga; abierto entra con el resorte del visor. */
-  .cajon-pro { translate: -40px 0; opacity: 0; visibility: hidden; transition: translate 0.45s var(--ios), opacity 0.2s, visibility 0s 0.45s; }
-  .cajon-pro[data-abierto] { translate: 0 0; opacity: 1; visibility: visible; transition: translate 0.45s var(--ios), opacity 0.25s, visibility 0s; }
+  .cajon-pro { translate: -40px 0; opacity: 0; visibility: hidden; transition: translate 0.45s var(--ios), opacity 0.2s, visibility 0s 0.45s, left 0.45s var(--ios); }
+  .cajon-pro[data-abierto] { translate: 0 0; opacity: 1; visibility: visible; transition: translate 0.45s var(--ios), opacity 0.25s, visibility 0s, left 0.45s var(--ios); }
   .cajon-cerrar { color: var(--tinta-2); transition: background-color 0.2s, color 0.2s; }
   .cajon-cerrar:hover { background: var(--superficie-2); color: var(--tinta); }
   .cajon-cerrar:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -1152,7 +1154,6 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
   /* El buscador: una tarjeta de borde completo; la lista de sugerencias, pegada debajo. */
   .buscador-pro .panel { border-radius: 26px; }
   .buscador-pro > div > .panel:first-child { height: 52px; box-shadow: var(--sombra); }
-  .dark .buscador-pro > div > .panel:first-child { background: var(--superficie-2); }
   .buscador-pro [role="listbox"] { top: 60px; border-radius: 22px; }
 
   /* Los chips. */
@@ -1175,7 +1176,7 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
   .ayuda-pro { border-radius: 999px; color: var(--tinta-2); }
 
   /* Minimapa: la miniatura de abajo a la izquierda. */
-  .minimapa-pro .minimapa { width: var(--alto-mini); height: var(--alto-mini); border-radius: 14px; border: 3px solid var(--superficie); }
+  .minimapa-pro .minimapa { background: var(--papel); width: var(--alto-mini); height: var(--alto-mini); border-radius: 14px; border: 3px solid var(--superficie); }
 
   /* Controles de la derecha. */
   .boton-control-pro { color: var(--tinta-2); transition: background-color 0.2s, color 0.2s; }
@@ -1188,7 +1189,6 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
 @media (min-width: 1024px) {
   /* El interruptor, en el profesional: una tarjeta más (blanca en claro, gris en oscuro), con la pastilla en tinta. */
   .interfaz[data-interfaz="pro"] .interruptor-modo.panel { background: var(--superficie); box-shadow: var(--sombra); }
-  .dark .interfaz[data-interfaz="pro"] .interruptor-modo.panel { background: var(--superficie-2); }
   .interfaz[data-interfaz="pro"] .interruptor-pastilla { background: var(--tinta); }
   .interfaz[data-interfaz="pro"] .interruptor-opcion:not([aria-checked="true"]) { color: var(--tinta-2); }
   .interfaz[data-interfaz="pro"] .interruptor-opcion:not([aria-checked="true"]):hover { color: var(--tinta); }
@@ -1209,7 +1209,62 @@ html.dark .leyenda-colores { background: var(--superficie-3); }
   .campo-estado + .campo-estado { box-shadow: -1px 0 0 var(--linea); }
   .estado-tecnico .escala .ol-scale-line-inner { font-size: 11px; }
 }
-@media (min-width: 1024px) and (max-width: 1500px) {
-  /* Notebook: sin las coordenadas proyectadas en la barra (las geográficas entran enteras). */
+@media (min-width: 1024px) and (max-width: 1700px) {
+  /* Notebook (hasta 1700 px, con la letra grande del 20/11): sin las coordenadas proyectadas en la barra (las geográficas entran enteras). */
   .estado-tecnico .campo-estado[data-campo="xy"] { display: none; }
 }
+
+/* ============================================================================================================
+   Letra más grande en todo el profesional de escritorio (20/11): cada tamaño chico de los componentes
+   (compartidos con el simple) sube un escalón solo acá. Los títulos (17 px o más) quedan como están.
+   ============================================================================================================ */
+@media (min-width: 1024px) {
+  .interfaz[data-interfaz="pro"] .text-\[11px\] { font-size: 13px; }
+  .interfaz[data-interfaz="pro"] .text-\[11\.5px\] { font-size: 13px; }
+  .interfaz[data-interfaz="pro"] .text-\[12px\] { font-size: 13.5px; }
+  .interfaz[data-interfaz="pro"] .text-\[12\.5px\] { font-size: 14px; }
+  .interfaz[data-interfaz="pro"] .text-\[13px\] { font-size: 15px; }
+  .interfaz[data-interfaz="pro"] .text-\[13\.5px\] { font-size: 15px; }
+  .interfaz[data-interfaz="pro"] .text-\[14px\] { font-size: 15.5px; }
+  .interfaz[data-interfaz="pro"] .text-\[14\.5px\] { font-size: 16px; }
+  .interfaz[data-interfaz="pro"] .text-\[15px\] { font-size: 16.5px; }
+  .interfaz[data-interfaz="pro"] .text-\[15\.5px\] { font-size: 17px; }
+  .interfaz[data-interfaz="pro"] .text-\[16px\] { font-size: 17px; }
+  .interfaz[data-interfaz="pro"] .text-sm { font-size: 15.5px; }
+  .interfaz[data-interfaz="pro"] .text-xs { font-size: 13.5px; }
+  .interfaz[data-interfaz="pro"] { --alto-estado: 40px; }
+  .estado-pro > .panel { font-size: 14.5px; }
+  .estado-tecnico .escala .ol-scale-line-inner { font-size: 12.5px; }
+  .chip-tecla { font-size: 13px; min-width: 22px; height: 22px; }
+  /* La sidebar: los nombres a 16 px (la fuente trae text-sm). */
+  .riel-pro .item-riel-aceternity > span { font-size: 16px; }
+
+  /* Los desplegables de HeroUI (Select de las obras) se dibujan en <body>, fuera de la interfaz: toman acá
+     el negro del pro. */
+  html[data-pro-escritorio] :is(.select__popover, .combo-box__popover, .dropdown__popover) {
+    --notch-fondo: #0b0c0e;
+    color-scheme: dark;
+    --overlay: var(--notch-fondo);
+    --overlay-foreground: #f1f2f0;
+    --foreground: #f1f2f0;
+    --surface: var(--notch-fondo);
+    --default: color-mix(in srgb, var(--notch-fondo), #fff 10%);
+    --default-foreground: #f1f2f0;
+    --muted: #a9afb6;
+    --border: color-mix(in srgb, var(--notch-fondo), #fff 10%);
+    --separator: color-mix(in srgb, var(--notch-fondo), #fff 10%);
+    --superficie: var(--notch-fondo);
+    --superficie-2: color-mix(in srgb, var(--notch-fondo), #fff 8%);
+    --superficie-3: color-mix(in srgb, var(--notch-fondo), #fff 13%);
+    --tinta: #f1f2f0;
+    --tinta-2: #c0c5ca;
+    --tinta-3: #a9afb6;
+    color: #f1f2f0;
+  }
+  html.dark[data-pro-escritorio] :is(.select__popover, .combo-box__popover, .dropdown__popover) { --notch-fondo: #262a30; }
+}
+
+/* Fuente del mapa base externo (mapaBase.ts), sobre el mapa: abajo a la derecha, arriba de la barra de estado. */
+.mapa .ol-attribution.atribucion-base { position: absolute; right: 84px; bottom: 48px; z-index: 5; padding: 3px 8px; border-radius: 8px; font-size: 12.5px; color: #15171a; background: rgba(255, 255, 255, 0.82); }
+.mapa .atribucion-base ul { margin: 0; padding: 0; list-style: none; }
+.mapa .atribucion-base button { display: none; }

@@ -285,8 +285,17 @@ function agrandarSld(xml: string) {
 // `sinEscala`: capas que se consultan sin las reglas de escala (las que se ven como mapa de calor: la
 // mancha muestra todos sus puntos a cualquier escala, así que la consulta también los encuentra).
 const PUNTO_CONSULTA: Regla[] = [{ titulo: 'Punto', simbolo: punto('#000000', 8) }];
+// Con un mapa base externo (profesional, mapaBase.ts) las provincias no se rellenan: Chaco queda con un velo y
+// el resto solo con su borde, para que se vea el fondo.
+let conFondoExterno = false;
+export const usarFondoExterno = (activo: boolean) => { conFondoExterno = activo; };
+const PROVINCIAS_SOBRE_FONDO: Regla[] = [
+  { titulo: 'Provincia del Chaco', filtro: igual('provincia', 'Chaco'), simbolo: relleno('#FBEFD5', 0.18, ['#8C6D46', 1.6]) },
+  { titulo: 'Otras provincias', filtro: RESTO, simbolo: linea('#9A9087', 0.8) },
+];
+const reglasDe = (n: string) => (conFondoExterno && n === 'provincias' ? PROVINCIAS_SOBRE_FONDO : REGLAS[n]);
 export const sldDeCapas = (nombres: string[], sinRotulos: ReadonlySet<string> = new Set(), sinEscala: ReadonlySet<string> = new Set()) =>
-  agrandarSld(sld(nombres.map(n => capa(n, sinEscala.has(n) ? PUNTO_CONSULTA : sinRotulos.has(n) ? REGLAS[n]?.filter(r => !r.titulo.startsWith('Rótulo')) : REGLAS[n])).join('')));
+  agrandarSld(sld(nombres.map(n => capa(n, sinEscala.has(n) ? PUNTO_CONSULTA : sinRotulos.has(n) ? reglasDe(n)?.filter(r => !r.titulo.startsWith('Rótulo')) : reglasDe(n))).join('')));
 
 // Modo simple: los títulos de la leyenda con palabras de todos los días (mismos símbolos y colores).
 const TITULOS_SIMPLES: Record<string, string> = {
